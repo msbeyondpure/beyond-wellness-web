@@ -207,7 +207,7 @@ export default function Layout({ user, activeView, setActiveView, taskStats, chi
       </nav>
 
       {/* === Page content (with bottom-nav padding on mobile) === */}
-      <div className={`${settings.fontSize === 'small' ? 'text-sm' : settings.fontSize === 'large' ? 'text-lg' : 'text-base'} pb-20 sm:pb-0`}>
+      <div className={`${settings.fontSize === 'small' ? 'text-sm' : settings.fontSize === 'large' ? 'text-lg' : 'text-base'} pb-16 sm:pb-0`}>
         {children}
       </div>
 
@@ -220,7 +220,6 @@ export default function Layout({ user, activeView, setActiveView, taskStats, chi
             className={activeView === t.id ? 'active' : ''}
           >
             {t.icon}
-            <span>{t.label}</span>
           </button>
         ))}
         <button
@@ -228,7 +227,6 @@ export default function Layout({ user, activeView, setActiveView, taskStats, chi
           className={activeView === 'migrate' ? 'active' : ''}
         >
           <MoreIcon />
-          <span>More</span>
         </button>
       </nav>
 
