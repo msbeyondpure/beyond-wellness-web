@@ -26,6 +26,21 @@ function Toast({ msg }) {
   )
 }
 
+// ── persistent undo helpers (formula-level) ───────────────────────────────────
+const F_UNDO_KEY = (id) => `bwFUndo:${id}`
+const F_REDO_KEY = (id) => `bwFRedo:${id}`
+const F_MAX      = 50
+
+function fLoadStack(key) {
+  try { return JSON.parse(localStorage.getItem(key)) || [] } catch { return [] }
+}
+function fSaveStack(key, arr) {
+  try { localStorage.setItem(key, JSON.stringify(arr)) } catch {}
+}
+function formulaSnapshot(f) {
+  return { name: f.name, ingredients: JSON.parse(JSON.stringify(f.ingredients || [])), target_cost: f.target_cost || '', target_margin: f.target_margin || '', notes: f.notes || '' }
+}
+
 export default function Formulas({ userId }) {
   const { formulas, loading, saveFormula, deleteFormula, addFormula } = useFormulas(userId)
   const [activeId, setActiveId] = useState(null)
@@ -39,6 +54,14 @@ export default function Formulas({ userId }) {
   const [showImport, setShowImport] = useState(false)
   const [importText, setImportText] = useState('')
   const [importError, setImportError] = useState('')
+  const [historyVer, setHistoryVer] = useState(0)
+
+  // per-formula undo/redo stored in refs (keys = formula id)
+  const undoRef   = useRef({})  // { [id]: snapshot[] }
+  const redoRef   = useRef({})  // { [id]: snapshot[] }
+  // capture state BEFORE a mutation so we can push it as the undo checkpoint
+  const preMutRef = useRef(null) // snapshot captured just before first onChange
+  const preMutTimer = useRef(null)
 
   const [localFormulas, setLocalFormulas] = useState([])
   const [showMobileSidebar, setShowMobileSidebar] = useState(false)
@@ -47,9 +70,101 @@ export default function Formulas({ userId }) {
   // Auto-close mobile drawer when a formula is selected
   useEffect(() => { if (activeId) setShowMobileSidebar(false) }, [activeId])
 
+  // Load undo/redo for newly selected formula
+  useEffect(() => {
+    if (!activeId) return
+    if (!undoRef.current[activeId]) undoRef.current[activeId] = fLoadStack(F_UNDO_KEY(activeId))
+    if (!redoRef.current[activeId]) redoRef.current[activeId] = fLoadStack(F_REDO_KEY(activeId))
+    setHistoryVer(v => v + 1)
+  }, [activeId])
+
   const active = localFormulas.find(f => f.id === activeId)
 
+  const canFUndo = activeId && (undoRef.current[activeId]?.length > 0)
+  const canFRedo = activeId && (redoRef.current[activeId]?.length > 0)
+
   function showToast(msg) { setToast(msg); setTimeout(() => setToast(null), 1800) }
+
+  // Schedule capturing the pre-mutation snapshot (first keystroke in a change session)
+  function schedulePre(formula) {
+    if (preMutRef.current?.id === formula.id) return // already captured for this session
+    const snap = formulaSnapshot(formula)
+    preMutRef.current = { id: formula.id, snap }
+    clearTimeout(preMutTimer.current)
+    preMutTimer.current = setTimeout(() => {
+      // Commit the pre-mutation snapshot to undo stack after 2s of inactivity
+      if (preMutRef.current) {
+        const { id, snap } = preMutRef.current
+        const stack = undoRef.current[id] || []
+        const last  = stack[stack.length - 1]
+        if (JSON.stringify(last) !== JSON.stringify(snap)) {
+          const next = [...stack, snap].slice(-F_MAX)
+          undoRef.current[id] = next
+          redoRef.current[id] = []
+          fSaveStack(F_UNDO_KEY(id), next)
+          try { localStorage.removeItem(F_REDO_KEY(id)) } catch {}
+          setHistoryVer(v => v + 1)
+        }
+        preMutRef.current = null
+      }
+    }, 2000)
+  }
+
+  function performFormulaUndo() {
+    if (!active) return
+    const id    = active.id
+    const stack = undoRef.current[id] || []
+    if (stack.length === 0) return
+    const prev    = stack[stack.length - 1]
+    const newUndo = stack.slice(0, -1)
+    const curr    = formulaSnapshot(active)
+    const redoStack = redoRef.current[id] || []
+    const newRedo   = [...redoStack, curr].slice(-F_MAX)
+    undoRef.current[id] = newUndo
+    redoRef.current[id] = newRedo
+    fSaveStack(F_UNDO_KEY(id), newUndo)
+    fSaveStack(F_REDO_KEY(id), newRedo)
+    const restored = { ...active, ...prev }
+    updateLocal(id, prev)
+    handleSave(restored, true)
+    setHistoryVer(v => v + 1)
+    showToast('Undone')
+  }
+
+  function performFormulaRedo() {
+    if (!active) return
+    const id      = active.id
+    const rStack  = redoRef.current[id] || []
+    if (rStack.length === 0) return
+    const next    = rStack[rStack.length - 1]
+    const newRedo = rStack.slice(0, -1)
+    const curr    = formulaSnapshot(active)
+    const uStack  = undoRef.current[id] || []
+    const newUndo = [...uStack, curr].slice(-F_MAX)
+    undoRef.current[id] = newUndo
+    redoRef.current[id] = newRedo
+    fSaveStack(F_UNDO_KEY(id), newUndo)
+    fSaveStack(F_REDO_KEY(id), newRedo)
+    const restored = { ...active, ...next }
+    updateLocal(id, next)
+    handleSave(restored, true)
+    setHistoryVer(v => v + 1)
+    showToast('Redone')
+  }
+
+  // Keyboard: Ctrl+Z / Ctrl+Y when not inside an input
+  useEffect(() => {
+    const fn = (e) => {
+      const mod = e.ctrlKey || e.metaKey
+      if (!mod) return
+      const inInput = ['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)
+      if (inInput) return
+      if (e.key === 'z' && !e.shiftKey) { e.preventDefault(); performFormulaUndo() }
+      if (e.key === 'y' || (e.shiftKey && e.key === 'Z')) { e.preventDefault(); performFormulaRedo() }
+    }
+    window.addEventListener('keydown', fn)
+    return () => window.removeEventListener('keydown', fn)
+  }) // no dep array — always reads latest refs / state
 
   function updateLocal(id, updates) {
     setLocalFormulas(prev => prev.map(f => f.id === id ? { ...f, ...updates } : f))
@@ -62,7 +177,25 @@ export default function Formulas({ userId }) {
     setNewName(''); setShowNew(false)
   }
 
-  async function handleSave(formula) {
+  async function handleSave(formula, skipSnapshot = false) {
+    if (!skipSnapshot && formula.id) {
+      // Flush any pending pre-mutation snapshot before saving
+      if (preMutRef.current?.id === formula.id) {
+        clearTimeout(preMutTimer.current)
+        const { id, snap } = preMutRef.current
+        const stack = undoRef.current[id] || []
+        const last  = stack[stack.length - 1]
+        if (JSON.stringify(last) !== JSON.stringify(snap)) {
+          const next = [...stack, snap].slice(-F_MAX)
+          undoRef.current[id] = next
+          redoRef.current[id] = []
+          fSaveStack(F_UNDO_KEY(id), next)
+          try { localStorage.removeItem(F_REDO_KEY(id)) } catch {}
+          setHistoryVer(v => v + 1)
+        }
+        preMutRef.current = null
+      }
+    }
     await saveFormula({
       id: formula.id,
       name: formula.name,
@@ -77,6 +210,7 @@ export default function Formulas({ userId }) {
   function addIngredient(formulaId) {
     const formula = localFormulas.find(f => f.id === formulaId)
     if (!formula) return
+    schedulePre(formula)
     const newIng = { id: crypto.randomUUID(), name: '', amount: '', cost: '', ratio: '', includeInRatio: true }
     const updated = { ...formula, ingredients: [...formula.ingredients, newIng] }
     updateLocal(formulaId, { ingredients: updated.ingredients })
@@ -86,6 +220,7 @@ export default function Formulas({ userId }) {
   function updateIngredient(formulaId, ingId, changes) {
     const formula = localFormulas.find(f => f.id === formulaId)
     if (!formula) return
+    schedulePre(formula)
     const updated = { ...formula, ingredients: formula.ingredients.map(i => i.id === ingId ? { ...i, ...changes } : i) }
     updateLocal(formulaId, { ingredients: updated.ingredients })
     return updated
@@ -94,6 +229,7 @@ export default function Formulas({ userId }) {
   function removeIngredient(formulaId, ingId) {
     const formula = localFormulas.find(f => f.id === formulaId)
     if (!formula) return
+    schedulePre(formula)
     const updated = { ...formula, ingredients: formula.ingredients.filter(i => i.id !== ingId) }
     updateLocal(formulaId, { ingredients: updated.ingredients })
     handleSave(updated)
@@ -106,6 +242,7 @@ export default function Formulas({ userId }) {
 
   function saveName() {
     if (nameDraft.trim() && active) {
+      schedulePre(active)
       const updated = { ...active, name: nameDraft.trim() }
       updateLocal(activeId, { name: nameDraft.trim() })
       handleSave(updated)
@@ -332,7 +469,25 @@ export default function Formulas({ userId }) {
                   </h2>
                 )}
 
-                <div className="flex gap-1 sm:gap-2 shrink-0">
+                <div className="flex gap-1 sm:gap-2 shrink-0 items-center">
+                  {/* Undo / Redo */}
+                  <button
+                    onClick={performFormulaUndo}
+                    disabled={!canFUndo}
+                    title="Undo (Ctrl+Z)"
+                    className={`p-1.5 rounded transition-all ${canFUndo ? 'text-gray-400 hover:text-white hover:bg-white/10' : 'text-gray-700 cursor-not-allowed'}`}
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/></svg>
+                  </button>
+                  <button
+                    onClick={performFormulaRedo}
+                    disabled={!canFRedo}
+                    title="Redo (Ctrl+Y)"
+                    className={`p-1.5 rounded transition-all ${canFRedo ? 'text-gray-400 hover:text-white hover:bg-white/10' : 'text-gray-700 cursor-not-allowed'}`}
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 14 20 9 15 4"/><path d="M4 20v-7a4 4 0 0 1 4-4h12"/></svg>
+                  </button>
+                  <div className="w-px h-4 bg-white/10" />
                   <button onClick={() => setShowImport(true)} className="text-xs text-gray-500 hover:text-gray-300 px-2 py-1.5 sm:py-1 rounded hover:bg-white/5 active:bg-white/5 transition-all">Import</button>
                   <button onClick={() => exportFormula('txt')} className="hidden sm:inline text-xs text-gray-500 hover:text-gray-300 px-2 py-1 rounded hover:bg-white/5 transition-all">TXT</button>
                   <button onClick={() => exportFormula('md')} className="text-xs text-gray-500 hover:text-gray-300 px-2 py-1.5 sm:py-1 rounded hover:bg-white/5 active:bg-white/5 transition-all">MD</button>
@@ -492,9 +647,50 @@ export default function Formulas({ userId }) {
                   </button>
 
                   {active.ingredients.length > 0 && (
-                    <div className="mt-3 pt-3 border-t border-white/5 flex items-center justify-between">
-                      <span className="text-xs text-gray-600">Total Cost</span>
-                      <span className="text-sm font-semibold text-brand-accent">${getTotalCost(active).toFixed(2)}</span>
+                    <div className="mt-3 pt-3 border-t border-white/5">
+                      <div className="flex items-center justify-between mb-3">
+                        <span className="text-xs text-gray-600">Total Cost</span>
+                        <span className="text-sm font-semibold text-brand-accent">${getTotalCost(active).toFixed(2)}</span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-xs text-gray-600 block mb-1">Target Cost ($)</label>
+                          <input
+                            value={active.target_cost || ''}
+                            onChange={e => { schedulePre(active); updateLocal(active.id, { target_cost: e.target.value }) }}
+                            onBlur={() => handleSave(active)}
+                            placeholder="0.00"
+                            className="w-full bg-brand-dark border border-white/10 rounded px-2 py-1.5 text-sm text-white placeholder-gray-600 outline-none focus:border-brand-accent/40 transition-colors"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs text-gray-600 block mb-1">Target Margin (%)</label>
+                          <input
+                            value={active.target_margin || ''}
+                            onChange={e => { schedulePre(active); updateLocal(active.id, { target_margin: e.target.value }) }}
+                            onBlur={() => handleSave(active)}
+                            placeholder="50"
+                            className="w-full bg-brand-dark border border-white/10 rounded px-2 py-1.5 text-sm text-white placeholder-gray-600 outline-none focus:border-brand-accent/40 transition-colors"
+                          />
+                        </div>
+                      </div>
+                      {/* Calculated profit if both fields filled */}
+                      {active.target_cost && active.target_margin && (() => {
+                        const tc  = parseFloat(active.target_cost)
+                        const tm  = parseFloat(active.target_margin)
+                        const tot = getTotalCost(active)
+                        if (!isNaN(tc) && !isNaN(tm) && tot > 0) {
+                          const profit = tc - tot
+                          const margin = ((profit / tc) * 100).toFixed(1)
+                          return (
+                            <div className="mt-2 flex gap-4 text-xs">
+                              <span className="text-gray-600">Profit: <span className={profit >= 0 ? 'text-brand-success' : 'text-red-400'}>${profit.toFixed(2)}</span></span>
+                              <span className="text-gray-600">Actual margin: <span className={parseFloat(margin) >= tm ? 'text-brand-success' : 'text-red-400'}>{margin}%</span></span>
+                            </div>
+                          )
+                        }
+                        return null
+                      })()}
                     </div>
                   )}
 
@@ -502,7 +698,7 @@ export default function Formulas({ userId }) {
                     <label className="text-xs text-gray-600 block mb-1.5">Notes</label>
                     <textarea
                       value={active.notes || ''}
-                      onChange={e => updateLocal(active.id, { notes: e.target.value })}
+                      onChange={e => { schedulePre(active); updateLocal(active.id, { notes: e.target.value }) }}
                       onBlur={() => handleSave(active)}
                       placeholder="Formula notes..."
                       rows={3}

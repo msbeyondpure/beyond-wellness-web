@@ -33,12 +33,26 @@ const ExitFull   = () => <svg width="13" height="13" viewBox="0 0 24 24" fill="n
 const SearchIco  = () => <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
 const CloseIco   = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
 const DownloadIco= () => <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+const UndoIco    = () => <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/></svg>
+const RedoIco    = () => <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 14 20 9 15 4"/><path d="M4 20v-7a4 4 0 0 1 4-4h12"/></svg>
 
 // ── file type helpers ─────────────────────────────────────────────────────────
 const getExt = (name) => { const p = name.lastIndexOf('.'); return p > 0 ? name.slice(p + 1).toLowerCase() : '' }
 const isMarkdown = (name) => ['md', 'markdown'].includes(getExt(name))
 const isHtml     = (name) => ['html', 'htm'].includes(getExt(name))
 const isText     = (name) => ['md','markdown','txt','html','htm','js','jsx','ts','tsx','css','json','xml','csv','sh','py','rb','go','yaml','yml','toml','sql'].includes(getExt(name))
+
+// ── persistent undo helpers ───────────────────────────────────────────────────
+const UNDO_KEY  = (p) => `bwUndo:${p}`
+const REDO_KEY  = (p) => `bwRedo:${p}`
+const MAX_HIST  = 100
+
+function loadStack(key) {
+  try { return JSON.parse(localStorage.getItem(key)) || [] } catch { return [] }
+}
+function saveStack(key, arr) {
+  try { localStorage.setItem(key, JSON.stringify(arr)) } catch {}
+}
 
 // ── simple markdown renderer ──────────────────────────────────────────────────
 function renderMd(md) {
@@ -92,9 +106,9 @@ function TreeNode({ node, files, depth = 0, activeFile, openFolders, onSelect, o
     if (a.type !== b.type) return a.type === 'folder' ? -1 : 1
     return a.name.localeCompare(b.name)
   })
-  const isOpen = openFolders.has(node.path)
+  const isOpen   = openFolders.has(node.path)
   const isActive = activeFile?.path === node.path
-  const ext = node.type === 'file' ? getExt(node.name) : ''
+  const ext      = node.type === 'file' ? getExt(node.name) : ''
 
   return (
     <div>
@@ -138,13 +152,14 @@ function TreeNode({ node, files, depth = 0, activeFile, openFolders, onSelect, o
 }
 
 // ── toolbar button ────────────────────────────────────────────────────────────
-function TB({ onClick, title, active, children }) {
+function TB({ onClick, title, active, disabled, children }) {
   return (
     <button
-      onMouseDown={e => { e.preventDefault(); onClick() }}
+      onMouseDown={e => { e.preventDefault(); if (!disabled) onClick() }}
       title={title}
+      disabled={disabled}
       className={`px-1.5 py-1 rounded text-xs transition-all select-none
-        ${active ? 'bg-brand-accent/30 text-brand-accent' : 'text-gray-400 hover:text-white hover:bg-white/10'}`}
+        ${disabled ? 'opacity-25 cursor-not-allowed' : active ? 'bg-brand-accent/30 text-brand-accent' : 'text-gray-400 hover:text-white hover:bg-white/10'}`}
     >
       {children}
     </button>
@@ -153,7 +168,7 @@ function TB({ onClick, title, active, children }) {
 
 // ── stat helpers ──────────────────────────────────────────────────────────────
 function getWordCount(text) { return text.trim().split(/\s+/).filter(Boolean).length }
-function getReadTime(text) { return Math.max(1, Math.round(getWordCount(text) / 200)) }
+function getReadTime(text)  { return Math.max(1, Math.round(getWordCount(text) / 200)) }
 function getCursorPos(text, idx) {
   const lines = text.slice(0, idx).split('\n')
   return { line: lines.length, col: lines[lines.length - 1].length + 1 }
@@ -163,86 +178,179 @@ function getCursorPos(text, idx) {
 export default function Editor({ userId }) {
   const { files, loading, createNode, saveContent, deleteNode, renameNode } = useEditorFiles(userId)
 
-  const [activeFile, setActiveFile] = useState(null)   // { path, name }
-  const [content, setContent]       = useState('')      // current editor content (live)
-  const [savedContent, setSavedContent] = useState('')  // last saved snapshot
-  const [saveStatus, setSaveStatus] = useState('saved') // 'saved' | 'saving' | 'modified'
-  const [openFolders, setOpenFolders] = useState(new Set())
-  const [contextMenu, setContextMenu] = useState(null)
-  const [renaming, setRenaming]     = useState(null)
-  const [renameValue, setRenameValue] = useState('')
+  const [activeFile, setActiveFile]       = useState(null)
+  const [content, setContent]             = useState('')
+  const [saveStatus, setSaveStatus]       = useState('saved')
+  const [openFolders, setOpenFolders]     = useState(new Set())
+  const [contextMenu, setContextMenu]     = useState(null)
+  const [renaming, setRenaming]           = useState(null)
+  const [renameValue, setRenameValue]     = useState('')
   const [newItemTarget, setNewItemTarget] = useState(null)
-  const [newItemName, setNewItemName] = useState('')
-  const [viewMode, setViewMode]     = useState('source')
-  const [leftW, setLeftW]           = useState(() => parseInt(localStorage.getItem('bwEditorLeftW') || '240', 10))
+  const [newItemName, setNewItemName]     = useState('')
+  const [viewMode, setViewMode]           = useState('source')
+  const [leftW, setLeftW]                 = useState(() => parseInt(localStorage.getItem('bwEditorLeftW') || '240', 10))
   const [showMobileSidebar, setShowMobileSidebar] = useState(false)
-  const [fullScreen, setFullScreen] = useState(false)
-  const [showFind, setShowFind]     = useState(false)
-  const [findQuery, setFindQuery]   = useState('')
-  const [cursorPos, setCursorPos]   = useState({ line: 1, col: 1 })
-  const [openTabs, setOpenTabs]     = useState([]) // [{path, name}]
+  const [fullScreen, setFullScreen]       = useState(false)
+  const [showFind, setShowFind]           = useState(false)
+  const [findQuery, setFindQuery]         = useState('')
+  const [cursorPos, setCursorPos]         = useState({ line: 1, col: 1 })
+  const [openTabs, setOpenTabs]           = useState([])
+  const [historyVer, setHistoryVer]       = useState(0) // triggers re-render for canUndo/canRedo
 
-  const textareaRef = useRef(null)
-  const saveTimer   = useRef(null)
-  const resizing    = useRef(false)
+  const textareaRef           = useRef(null)
+  const saveTimer             = useRef(null)
+  const checkpointTimer       = useRef(null)
+  const resizing              = useRef(false)
+  const savedContentRef       = useRef('')   // last content that was actually saved to DB
+  const undoRef               = useRef([])   // string[] — per-file undo stack
+  const redoRef               = useRef([])   // string[] — per-file redo stack
+  const lastCheckpointRef     = useRef('')   // content at last checkpoint push
 
-  // persist panel width
+  const canUndo = undoRef.current.length > 0
+  const canRedo = redoRef.current.length > 0
+
+  // ── helpers ────────────────────────────────────────────────────────────────
+  function bumpHistory() { setHistoryVer(v => v + 1) }
+
+  function loadHistory(path) {
+    undoRef.current = loadStack(UNDO_KEY(path))
+    redoRef.current = loadStack(REDO_KEY(path))
+    bumpHistory()
+  }
+
+  function pushCheckpoint(val, path = activeFile?.path) {
+    if (!path || val === lastCheckpointRef.current) return
+    lastCheckpointRef.current = val
+    const next = [...undoRef.current, val].slice(-MAX_HIST)
+    undoRef.current = next
+    redoRef.current = []
+    saveStack(UNDO_KEY(path), next)
+    try { localStorage.removeItem(REDO_KEY(path)) } catch {}
+    bumpHistory()
+  }
+
+  function performUndo() {
+    if (!activeFile || undoRef.current.length === 0) return
+    const prev    = undoRef.current[undoRef.current.length - 1]
+    const newUndo = undoRef.current.slice(0, -1)
+    const newRedo = [...redoRef.current, content].slice(-MAX_HIST)
+    undoRef.current = newUndo
+    redoRef.current = newRedo
+    saveStack(UNDO_KEY(activeFile.path), newUndo)
+    saveStack(REDO_KEY(activeFile.path), newRedo)
+    lastCheckpointRef.current = prev
+    setContent(prev)
+    bumpHistory()
+  }
+
+  function performRedo() {
+    if (!activeFile || redoRef.current.length === 0) return
+    const next    = redoRef.current[redoRef.current.length - 1]
+    const newRedo = redoRef.current.slice(0, -1)
+    const newUndo = [...undoRef.current, content].slice(-MAX_HIST)
+    undoRef.current = newUndo
+    redoRef.current = newRedo
+    saveStack(UNDO_KEY(activeFile.path), newUndo)
+    saveStack(REDO_KEY(activeFile.path), newRedo)
+    lastCheckpointRef.current = next
+    setContent(next)
+    bumpHistory()
+  }
+
+  // ── persist panel width ───────────────────────────────────────────────────
   useEffect(() => { localStorage.setItem('bwEditorLeftW', String(leftW)) }, [leftW])
 
-  // close drawer when file opens
+  // ── close drawer when file opens ──────────────────────────────────────────
   useEffect(() => { if (activeFile) setShowMobileSidebar(false) }, [activeFile?.path])
 
-  // force off split on mobile
+  // ── force off split on mobile ─────────────────────────────────────────────
   useEffect(() => {
     const fn = () => { if (window.innerWidth < 640 && viewMode === 'split') setViewMode('source') }
     fn(); window.addEventListener('resize', fn)
     return () => window.removeEventListener('resize', fn)
   }, [viewMode])
 
-  // sync content when active file changes
+  // ── load content when switching files ─────────────────────────────────────
   useEffect(() => {
     if (!activeFile) return
     const f = files.find(f => f.path === activeFile.path)
-    if (f) { setContent(f.content || ''); setSavedContent(f.content || ''); setSaveStatus('saved') }
-  }, [activeFile?.path, files])
+    if (!f) return
+    const c = f.content || ''
+    setContent(c)
+    setSaveStatus('saved')
+    savedContentRef.current = c
+    lastCheckpointRef.current = c
+    loadHistory(activeFile.path)
+  }, [activeFile?.path]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // auto-save debounce (1.2s)
+  // ── realtime sync — only apply if no unsaved local changes ────────────────
   useEffect(() => {
     if (!activeFile) return
-    if (content === savedContent) { setSaveStatus('saved'); return }
+    const f = files.find(f => f.path === activeFile.path)
+    if (!f) return
+    const dbContent = f.content || ''
+    if (dbContent === savedContentRef.current) return // nothing changed remotely
+    // Another device saved — apply only if we have no local edits
+    const prevSaved = savedContentRef.current
+    savedContentRef.current = dbContent
+    setContent(curr => {
+      if (curr === prevSaved) {
+        // No local unsaved changes — accept remote version
+        lastCheckpointRef.current = dbContent
+        return dbContent
+      }
+      // We have unsaved local changes — keep local, status becomes modified
+      return curr
+    })
+    setSaveStatus(curr => curr === 'saved' ? 'saved' : curr)
+  }, [files]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── auto-save + checkpoint debounce ──────────────────────────────────────
+  useEffect(() => {
+    if (!activeFile) return
+    if (content === savedContentRef.current) { setSaveStatus('saved'); return }
     setSaveStatus('modified')
+
+    // Checkpoint after 1 s of no typing
+    clearTimeout(checkpointTimer.current)
+    checkpointTimer.current = setTimeout(() => pushCheckpoint(content), 1000)
+
+    // Auto-save after 1.2 s
     clearTimeout(saveTimer.current)
     saveTimer.current = setTimeout(async () => {
       setSaveStatus('saving')
       await saveContent(activeFile.path, content)
-      setSavedContent(content)
+      savedContentRef.current = content
       setSaveStatus('saved')
     }, 1200)
-    return () => clearTimeout(saveTimer.current)
-  }, [content])
 
-  // keyboard shortcuts
+    return () => { clearTimeout(saveTimer.current); clearTimeout(checkpointTimer.current) }
+  }, [content]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── keyboard shortcuts ────────────────────────────────────────────────────
   useEffect(() => {
     const fn = (e) => {
       const mod = e.ctrlKey || e.metaKey
-      if (mod && e.key === 's') { e.preventDefault(); forceSave() }
-      if (mod && e.key === 'f') { e.preventDefault(); setShowFind(v => !v) }
-      if (mod && e.key === 'b') { e.preventDefault(); applyFormat('bold') }
-      if (mod && e.key === 'i') { e.preventDefault(); applyFormat('italic') }
-      if (mod && e.key === 'k') { e.preventDefault(); applyFormat('link') }
-      if (e.key === 'Escape') { setShowFind(false); setFullScreen(false) }
+      if (!mod) return
+      if (e.key === 's')                          { e.preventDefault(); forceSave() }
+      if (e.key === 'f')                          { e.preventDefault(); setShowFind(v => !v) }
+      if (e.key === 'b')                          { e.preventDefault(); applyFormat('bold') }
+      if (e.key === 'i')                          { e.preventDefault(); applyFormat('italic') }
+      if (e.key === 'k')                          { e.preventDefault(); applyFormat('link') }
+      if (e.key === 'z' && !e.shiftKey)           { e.preventDefault(); performUndo() }
+      if (e.key === 'y' || (e.shiftKey && e.key === 'Z')) { e.preventDefault(); performRedo() }
+      if (e.key === 'Escape')                     { setShowFind(false); setFullScreen(false) }
     }
     window.addEventListener('keydown', fn)
     return () => window.removeEventListener('keydown', fn)
-  }, [content, savedContent, activeFile])
+  }) // no dep array — always reads latest refs
 
-  // ── file actions ─────────────────────────────────────────────────────────
+  // ── file actions ──────────────────────────────────────────────────────────
   async function openFile(node) {
     if (!isText(node.name)) return
     setActiveFile({ path: node.path, name: node.name })
     if (isMarkdown(node.name)) setViewMode('split')
     else setViewMode('source')
-    // open tabs
     setOpenTabs(prev => {
       const filtered = prev.filter(t => t.path !== node.path)
       return [{ path: node.path, name: node.name }, ...filtered].slice(0, 6)
@@ -252,9 +360,11 @@ export default function Editor({ userId }) {
   async function forceSave() {
     if (!activeFile) return
     clearTimeout(saveTimer.current)
+    clearTimeout(checkpointTimer.current)
     setSaveStatus('saving')
+    pushCheckpoint(content)
     await saveContent(activeFile.path, content)
-    setSavedContent(content)
+    savedContentRef.current = content
     setSaveStatus('saved')
   }
 
@@ -319,6 +429,7 @@ export default function Editor({ userId }) {
 
   // ── markdown formatting ───────────────────────────────────────────────────
   function applyFormat(fmt) {
+    pushCheckpoint(content) // snapshot before change
     const ta = textareaRef.current
     if (!ta) return
     const { selectionStart: ss, selectionEnd: se, value } = ta
@@ -328,29 +439,20 @@ export default function Editor({ userId }) {
     let insert = '', cursorAt
 
     switch (fmt) {
-      case 'bold':        insert = `**${sel || 'bold text'}**`;        cursorAt = ss + 2 + (sel.length || 9); break
-      case 'italic':      insert = `*${sel || 'italic text'}*`;         cursorAt = ss + 1 + (sel.length || 11); break
-      case 'strike':      insert = `~~${sel || 'strikethrough'}~~`;    cursorAt = ss + 2 + (sel.length || 13); break
-      case 'code':        insert = sel.includes('\n') ? `\`\`\`\n${sel || 'code'}\n\`\`\`` : `\`${sel || 'code'}\``; cursorAt = ss + insert.length; break
-      case 'link': {
-        const url = 'https://'
-        insert = `[${sel || 'link text'}](${url})`
-        cursorAt = ss + insert.length - 1
-        break
-      }
-      case 'image':       insert = `![${sel || 'alt text'}](https://)`; cursorAt = ss + insert.length - 1; break
-      case 'h1':          insert = wrapLine(before, sel || 'Heading 1', after, '# ');   cursorAt = ss + insert.length; break
-      case 'h2':          insert = wrapLine(before, sel || 'Heading 2', after, '## ');  cursorAt = ss + insert.length; break
-      case 'h3':          insert = wrapLine(before, sel || 'Heading 3', after, '### '); cursorAt = ss + insert.length; break
-      case 'quote':       insert = wrapLine(before, sel || 'quote', after, '> ');        cursorAt = ss + insert.length; break
-      case 'ul':          insert = wrapLine(before, sel || 'item', after, '- ');         cursorAt = ss + insert.length; break
-      case 'ol':          insert = wrapLine(before, sel || 'item', after, '1. ');        cursorAt = ss + insert.length; break
-      case 'hr':          insert = '\n---\n';                                            cursorAt = ss + insert.length; break
-      case 'table': {
-        insert = `\n| Column 1 | Column 2 | Column 3 |\n|---|---|---|\n| Cell | Cell | Cell |\n`
-        cursorAt = ss + insert.length
-        break
-      }
+      case 'bold':   insert = `**${sel || 'bold text'}**`;       cursorAt = ss + 2 + (sel.length || 9); break
+      case 'italic': insert = `*${sel || 'italic text'}*`;        cursorAt = ss + 1 + (sel.length || 11); break
+      case 'strike': insert = `~~${sel || 'strikethrough'}~~`;   cursorAt = ss + 2 + (sel.length || 13); break
+      case 'code':   insert = sel.includes('\n') ? `\`\`\`\n${sel || 'code'}\n\`\`\`` : `\`${sel || 'code'}\``; cursorAt = ss + insert.length; break
+      case 'link': { insert = `[${sel || 'link text'}](https://)`; cursorAt = ss + insert.length - 1; break }
+      case 'image':  insert = `![${sel || 'alt text'}](https://)`; cursorAt = ss + insert.length - 1; break
+      case 'h1':     insert = wrapLine(before, sel || 'Heading 1', after, '# ');  cursorAt = ss + insert.length; break
+      case 'h2':     insert = wrapLine(before, sel || 'Heading 2', after, '## '); cursorAt = ss + insert.length; break
+      case 'h3':     insert = wrapLine(before, sel || 'Heading 3', after, '### ');cursorAt = ss + insert.length; break
+      case 'quote':  insert = wrapLine(before, sel || 'quote', after, '> ');      cursorAt = ss + insert.length; break
+      case 'ul':     insert = wrapLine(before, sel || 'item', after, '- ');       cursorAt = ss + insert.length; break
+      case 'ol':     insert = wrapLine(before, sel || 'item', after, '1. ');      cursorAt = ss + insert.length; break
+      case 'hr':     insert = '\n---\n';                                          cursorAt = ss + insert.length; break
+      case 'table':  insert = `\n| Column 1 | Column 2 | Column 3 |\n|---|---|---|\n| Cell | Cell | Cell |\n`; cursorAt = ss + insert.length; break
       default: return
     }
 
@@ -360,7 +462,6 @@ export default function Editor({ userId }) {
   }
 
   function wrapLine(before, sel, after, prefix) {
-    // Add prefix at start of line
     const lineStart = before.lastIndexOf('\n') + 1
     return before.slice(lineStart) === '' ? prefix + sel : '\n' + prefix + sel
   }
@@ -373,7 +474,6 @@ export default function Editor({ userId }) {
       const { selectionStart: ss, selectionEnd: se, value } = ta
       const spaces = '  '
       if (e.shiftKey) {
-        // un-indent
         const lineStart = value.lastIndexOf('\n', ss - 1) + 1
         if (value.slice(lineStart, lineStart + 2) === spaces) {
           const newVal = value.slice(0, lineStart) + value.slice(lineStart + 2)
@@ -388,7 +488,7 @@ export default function Editor({ userId }) {
     }
   }
 
-  // ── download file ─────────────────────────────────────────────────────────
+  // ── download ──────────────────────────────────────────────────────────────
   function downloadFile() {
     if (!activeFile) return
     const blob = new Blob([content], { type: 'text/plain' })
@@ -397,7 +497,7 @@ export default function Editor({ userId }) {
     URL.revokeObjectURL(url)
   }
 
-  // ── find highlight ────────────────────────────────────────────────────────
+  // ── find ──────────────────────────────────────────────────────────────────
   const matchCount = findQuery && content
     ? (content.match(new RegExp(findQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi')) || []).length
     : 0
@@ -408,15 +508,15 @@ export default function Editor({ userId }) {
     return a.name.localeCompare(b.name)
   })
 
-  const isMd   = activeFile && isMarkdown(activeFile.name)
-  const isHtml_ = activeFile && isHtml(activeFile.name)
+  const isMd       = activeFile && isMarkdown(activeFile.name)
+  const isHtml_    = activeFile && isHtml(activeFile.name)
   const canPreview = isMd || isHtml_
-  const words  = getWordCount(content)
+  const words      = getWordCount(content)
 
   const statusColor = saveStatus === 'saved' ? 'text-brand-success' : saveStatus === 'saving' ? 'text-brand-accent' : 'text-gray-500'
   const statusLabel = saveStatus === 'saved' ? '✓ Saved' : saveStatus === 'saving' ? 'Saving…' : '● Unsaved'
 
-  // ── sidebar JSX (shared desktop + drawer) ────────────────────────────────
+  // ── sidebar JSX ───────────────────────────────────────────────────────────
   const sidebarContent = (
     <div className="glass-card sm:rounded-lg p-3 flex flex-col overflow-hidden h-full w-full">
       <div className="flex items-center justify-between mb-3 shrink-0">
@@ -427,7 +527,6 @@ export default function Editor({ userId }) {
         </div>
       </div>
 
-      {/* Root new-item input */}
       {newItemTarget?.parentPath === '' && (
         <div className="mb-2 shrink-0">
           <input autoFocus value={newItemName} onChange={e => setNewItemName(e.target.value)}
@@ -439,7 +538,6 @@ export default function Editor({ userId }) {
         </div>
       )}
 
-      {/* Tree */}
       <div className="flex-1 overflow-y-auto">
         {roots.length === 0 && !newItemTarget && (
           <p className="text-gray-600 text-xs text-center py-6 leading-relaxed">No files yet.<br />Use the + buttons above.</p>
@@ -457,7 +555,6 @@ export default function Editor({ userId }) {
               onRenameBlur={commitRename}
               onRenameKey={e => { if (e.key === 'Enter') commitRename(); if (e.key === 'Escape') setRenaming(null) }}
             />
-            {/* Nested new-item input */}
             {newItemTarget?.parentPath === node.path && openFolders.has(node.path) && (
               <div style={{ paddingLeft: '22px' }}>
                 <input autoFocus value={newItemName}
@@ -481,7 +578,6 @@ export default function Editor({ userId }) {
     </div>
   )
 
-  // ── render ────────────────────────────────────────────────────────────────
   return (
     <div
       className={`${fullScreen ? 'fixed inset-0 z-[60] bg-brand-bg' : 'p-3 pt-4 sm:p-4 sm:pt-6 h-[calc(100vh-136px)] sm:h-[calc(100vh-40px)]'} animate-fadeIn flex gap-3`}
@@ -495,7 +591,6 @@ export default function Editor({ userId }) {
     >
       <ContextMenu menu={contextMenu} onClose={() => setContextMenu(null)} />
 
-      {/* Mobile drawer backdrop */}
       {showMobileSidebar && (
         <div className="drawer-backdrop sm:hidden" onClick={() => setShowMobileSidebar(false)} />
       )}
@@ -508,7 +603,6 @@ export default function Editor({ userId }) {
         {sidebarContent}
       </div>
 
-      {/* Resize handle */}
       <div onMouseDown={startResize}
         className="hidden sm:block w-1 flex-shrink-0 cursor-col-resize rounded-full hover:bg-brand-accent/30 transition-colors"
         style={{ background: 'rgba(255,255,255,0.04)' }}
@@ -517,7 +611,6 @@ export default function Editor({ userId }) {
       {/* RIGHT PANEL */}
       <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
         {!activeFile ? (
-          /* ── empty state ── */
           <div className="glass-card rounded-lg h-full flex flex-col items-center justify-center text-center p-6 sm:p-8"
             onContextMenu={e => showCtx(e, [
               { label: '📄 New File',   action: () => { setNewItemTarget({ parentPath: '', type: 'file' }); setNewItemName('') } },
@@ -546,15 +639,13 @@ export default function Editor({ userId }) {
             </div>
           </div>
         ) : (
-          /* ── editor panel ── */
           <div className="glass-card rounded-lg flex flex-col overflow-hidden h-full">
 
-            {/* Open file tabs */}
+            {/* Tabs */}
             {openTabs.length > 1 && (
               <div className="flex overflow-x-auto shrink-0 border-b border-white/5 px-2 pt-1 gap-1 scrollbar-hide">
                 {openTabs.map(t => (
-                  <button
-                    key={t.path}
+                  <button key={t.path}
                     onClick={() => openFile(files.find(f => f.path === t.path) || t)}
                     className={`flex items-center gap-1.5 px-3 py-1 rounded-t text-xs whitespace-nowrap flex-shrink-0 border-b-2 transition-all
                       ${t.path === activeFile.path ? 'text-white border-brand-accent bg-white/5' : 'text-gray-500 border-transparent hover:text-gray-300 hover:bg-white/5'}`}
@@ -572,14 +663,17 @@ export default function Editor({ userId }) {
 
             {/* Toolbar */}
             <div className="flex items-center gap-1 px-2 sm:px-3 py-1.5 border-b border-white/5 shrink-0 flex-wrap">
-              {/* Hamburger (mobile) */}
               <button onClick={() => setShowMobileSidebar(true)} className="sm:hidden nav-icon mr-1" title="Files"><MenuIco /></button>
 
-              {/* File name */}
               <div className="flex items-center gap-1.5 flex-1 min-w-0 mr-2">
                 <FileIcon ext={getExt(activeFile.name)} />
                 <span className="text-white text-xs font-medium truncate">{activeFile.name}</span>
               </div>
+
+              {/* Undo / Redo */}
+              <TB onClick={performUndo} title="Undo (Ctrl+Z)" disabled={!canUndo}><UndoIco /></TB>
+              <TB onClick={performRedo} title="Redo (Ctrl+Y)" disabled={!canRedo}><RedoIco /></TB>
+              <div className="w-px h-4 bg-white/10 mx-0.5" />
 
               {/* Markdown toolbar */}
               {isMd && (
@@ -602,9 +696,8 @@ export default function Editor({ userId }) {
                 </div>
               )}
 
-              {/* Right-side controls */}
+              {/* Right controls */}
               <div className="flex items-center gap-0.5 ml-auto">
-                {/* View mode */}
                 {canPreview && (
                   <div className="flex gap-0.5 bg-white/5 rounded p-0.5">
                     {[{ v: 'source', l: 'Src' }, { v: 'preview', l: 'View' }, { v: 'split', l: 'Split' }].map(({ v, l }) => (
@@ -645,7 +738,6 @@ export default function Editor({ userId }) {
 
             {/* Editor area */}
             <div className="flex-1 overflow-hidden flex min-h-0">
-              {/* Source editor */}
               {(viewMode === 'source' || viewMode === 'split') && (
                 <div className={`flex flex-col overflow-hidden ${viewMode === 'split' ? 'w-1/2 border-r border-white/5' : 'w-full'}`}>
                   <textarea
@@ -653,30 +745,21 @@ export default function Editor({ userId }) {
                     value={content}
                     onChange={e => setContent(e.target.value)}
                     onKeyDown={handleKeyDown}
-                    onKeyUp={e => {
-                      const { selectionStart: ss, value } = e.target
-                      setCursorPos(getCursorPos(value, ss))
-                    }}
-                    onClick={e => {
-                      const { selectionStart: ss, value } = e.target
-                      setCursorPos(getCursorPos(value, ss))
-                    }}
+                    onKeyUp={e => { const { selectionStart: ss, value } = e.target; setCursorPos(getCursorPos(value, ss)) }}
+                    onClick={e => { const { selectionStart: ss, value } = e.target; setCursorPos(getCursorPos(value, ss)) }}
                     spellCheck={false}
                     className="source-editor flex-1 w-full resize-none"
                     style={{ maxHeight: 'none', height: '100%', minHeight: 'unset', borderRadius: 0, border: 'none' }}
-                    placeholder={isMd ? '# Heading\n\nStart writing…\n\nTip: use the toolbar to format, Ctrl+F to find, Ctrl+S to save.' : 'Start typing…'}
+                    placeholder={isMd ? '# Heading\n\nStart writing…\n\nTip: Ctrl+Z undo, Ctrl+Y redo. History persists across sessions.' : 'Start typing…'}
                   />
                 </div>
               )}
 
-              {/* Preview */}
               {(viewMode === 'preview' || viewMode === 'split') && (
                 <div className={`overflow-auto p-5 ${viewMode === 'split' ? 'w-1/2' : 'w-full'}`}>
                   {isMd ? (
-                    <div
-                      className="markdown-preview text-sm text-gray-300 max-w-none"
-                      dangerouslySetInnerHTML={{ __html: renderMd(content) }}
-                    />
+                    <div className="markdown-preview text-sm text-gray-300 max-w-none"
+                      dangerouslySetInnerHTML={{ __html: renderMd(content) }} />
                   ) : (
                     <iframe srcDoc={content} className="w-full h-full rounded border-0" sandbox="allow-scripts" title="preview" />
                   )}
@@ -687,6 +770,7 @@ export default function Editor({ userId }) {
             {/* Status bar */}
             <div className="flex items-center gap-3 sm:gap-4 px-3 py-1 border-t border-white/5 shrink-0 text-xs select-none">
               <span className={`font-medium ${statusColor}`}>{statusLabel}</span>
+              {canUndo && <span className="text-gray-700">{undoRef.current.length} undo</span>}
               <span className="text-gray-600">Ln {cursorPos.line}, Col {cursorPos.col}</span>
               <span className="text-gray-600">{content.split('\n').length} lines</span>
               {isMd && <>

@@ -18,10 +18,19 @@ export function useOutreach(userId) {
       return
     }
     if (!userId) return
-    supabase.from('outreach').select('*').eq('user_id', userId).order('created_at', { ascending: false }).then(({ data }) => {
+
+    async function loadAll() {
+      const { data } = await supabase.from('outreach').select('*').eq('user_id', userId).order('created_at', { ascending: false })
       setContacts(data || [])
       setLoading(false)
-    })
+    }
+    loadAll()
+
+    const channel = supabase.channel('outreach-' + userId)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'outreach', filter: `user_id=eq.${userId}` }, loadAll)
+      .subscribe()
+
+    return () => supabase.removeChannel(channel)
   }, [userId])
 
   const addContact = useCallback(async (fields = {}) => {

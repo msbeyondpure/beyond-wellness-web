@@ -18,10 +18,19 @@ export function useAffiliates(userId) {
       return
     }
     if (!userId) return
-    supabase.from('affiliates').select('*').eq('user_id', userId).order('created_at', { ascending: false }).then(({ data }) => {
+
+    async function loadAll() {
+      const { data } = await supabase.from('affiliates').select('*').eq('user_id', userId).order('created_at', { ascending: false })
       setAffiliates(data || [])
       setLoading(false)
-    })
+    }
+    loadAll()
+
+    const channel = supabase.channel('affiliates-' + userId)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'affiliates', filter: `user_id=eq.${userId}` }, loadAll)
+      .subscribe()
+
+    return () => supabase.removeChannel(channel)
   }, [userId])
 
   const addAffiliate = useCallback(async (fields = {}) => {

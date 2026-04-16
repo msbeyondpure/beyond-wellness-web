@@ -17,10 +17,19 @@ export function useFormulas(userId) {
       return
     }
     if (!userId) return
-    supabase.from('formulas').select('*').eq('user_id', userId).order('created_at').then(({ data }) => {
+
+    async function loadAll() {
+      const { data } = await supabase.from('formulas').select('*').eq('user_id', userId).order('created_at')
       setFormulas(data || [])
       setLoading(false)
-    })
+    }
+    loadAll()
+
+    const channel = supabase.channel('formulas-' + userId)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'formulas', filter: `user_id=eq.${userId}` }, loadAll)
+      .subscribe()
+
+    return () => supabase.removeChannel(channel)
   }, [userId])
 
   const saveFormula = useCallback(async (formula) => {
@@ -40,8 +49,8 @@ export function useFormulas(userId) {
       user_id: userId,
       name: formula.name,
       ingredients: formula.ingredients,
-      target_cost: formula.targetCost || formula.target_cost || '',
-      target_margin: formula.targetMargin || formula.target_margin || '',
+      target_cost: formula.targetCost ?? formula.target_cost ?? '',
+      target_margin: formula.targetMargin ?? formula.target_margin ?? '',
       notes: formula.notes || '',
       updated_at: new Date().toISOString(),
     }
@@ -67,7 +76,7 @@ export function useFormulas(userId) {
   const addFormula = useCallback(async (name = 'New Formula') => {
     const id = isConfigured ? undefined : (Date.now() + '-' + Math.random().toString(36).slice(2))
     if (!isConfigured) {
-      const f = { id, name, ingredients: [], targetCost: '', targetMargin: '', notes: '', createdAt: new Date().toISOString() }
+      const f = { id, name, ingredients: [], target_cost: '', target_margin: '', notes: '', created_at: new Date().toISOString() }
       setFormulas(prev => { const next = [...prev, f]; lsSet('bwFormulas', next); return next })
       return f
     }

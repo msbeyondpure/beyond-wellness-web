@@ -17,7 +17,7 @@ export function useEditorFiles(userId) {
   const [loading, setLoading] = useState(true)
   const useDB = isConfigured && !!userId
 
-  // Load
+  // ── Load + realtime ──────────────────────────────────────────────────────
   useEffect(() => {
     if (!useDB) {
       const tree = loadLocalTree()
@@ -29,15 +29,26 @@ export function useEditorFiles(userId) {
       setLoading(false)
       return
     }
-    supabase
-      .from('editor_files')
-      .select('*')
-      .eq('user_id', userId)
-      .order('path')
-      .then(({ data }) => { setFiles(data || []); setLoading(false) })
+
+    async function loadAll() {
+      const { data } = await supabase
+        .from('editor_files')
+        .select('*')
+        .eq('user_id', userId)
+        .order('path')
+      setFiles(data || [])
+      setLoading(false)
+    }
+    loadAll()
+
+    const channel = supabase.channel('editor_files-' + userId)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'editor_files', filter: `user_id=eq.${userId}` }, loadAll)
+      .subscribe()
+
+    return () => supabase.removeChannel(channel)
   }, [userId])
 
-  // Create file or folder
+  // ── Create file or folder ────────────────────────────────────────────────
   async function createNode(name, type, parentPath = '') {
     const trimmed = name.trim()
     if (!trimmed) return null
@@ -65,9 +76,8 @@ export function useEditorFiles(userId) {
     return null
   }
 
-  // Save file content (called by auto-save debounce)
+  // ── Save file content (instant — called by auto-save debounce) ───────────
   async function saveContent(path, content) {
-    // Update local state immediately
     setFiles(prev => prev.map(f => f.path === path ? { ...f, content } : f))
     if (!useDB) { saveLocalFile(path, content); return }
     await supabase
@@ -77,7 +87,7 @@ export function useEditorFiles(userId) {
       .eq('path', path)
   }
 
-  // Delete node and all descendants
+  // ── Delete node and all descendants ─────────────────────────────────────
   async function deleteNode(path) {
     const toDelete = files.filter(f => f.path === path || f.path.startsWith(path + '/'))
     const paths = new Set(toDelete.map(f => f.path))
@@ -96,7 +106,7 @@ export function useEditorFiles(userId) {
     setFiles(prev => prev.filter(f => !paths.has(f.path)))
   }
 
-  // Rename node (and update all descendant paths)
+  // ── Rename node (and update all descendant paths) ────────────────────────
   async function renameNode(path, newName) {
     if (!newName.trim()) return null
     const node = files.find(f => f.path === path)
@@ -104,7 +114,6 @@ export function useEditorFiles(userId) {
     const newPath = node.parent_path ? `${node.parent_path}/${newName.trim()}` : newName.trim()
     if (files.some(f => f.path === newPath)) return null
 
-    // Build path remap for node + descendants
     const remap = {}
     files.forEach(f => {
       if (f.path === path) remap[f.path] = newPath
@@ -116,10 +125,7 @@ export function useEditorFiles(userId) {
       const next = files.map(f => {
         if (!remap[f.path]) return f
         const np = remap[f.path]
-        if (f.type === 'file') {
-          saveLocalFile(np, loadLocalFile(f.path))
-          deleteLocalFile(f.path)
-        }
+        if (f.type === 'file') { saveLocalFile(np, loadLocalFile(f.path)); deleteLocalFile(f.path) }
         const isRoot = f.path === path
         return {
           ...f,
@@ -133,7 +139,6 @@ export function useEditorFiles(userId) {
       return { ...node, path: newPath, name: newName.trim() }
     }
 
-    // Supabase: update each affected row
     await Promise.all(
       Object.entries(remap).map(([oldP, newP]) => {
         const f = files.find(f => f.path === oldP)
