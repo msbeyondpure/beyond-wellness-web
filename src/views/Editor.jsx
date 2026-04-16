@@ -1,59 +1,69 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { supabase, isConfigured } from '../lib/supabase'
+import { useEditorFiles } from '../hooks/useEditorFiles'
 
-// ── icons ────────────────────────────────────────────────────────────────────
+// ── icons ─────────────────────────────────────────────────────────────────────
 const FolderIcon = ({ open }) => open
   ? <svg width="14" height="14" viewBox="0 0 24 24" fill="rgba(196,94,44,0.7)" stroke="rgba(196,94,44,0.9)" strokeWidth="1.5"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
   : <svg width="14" height="14" viewBox="0 0 24 24" fill="rgba(196,94,44,0.3)" stroke="rgba(196,94,44,0.6)" strokeWidth="1.5"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+
 const FileIcon = ({ ext }) => {
-  const color = ext === 'md' ? '#7dd3fc' : ext === 'html' || ext === 'htm' ? '#f97316' : ext === 'js' ? '#fbbf24' : ext === 'json' ? '#a3e635' : ext === 'css' ? '#c084fc' : '#9ca3af'
+  const color = ext === 'md' ? '#7dd3fc' : ext === 'html' || ext === 'htm' ? '#f97316'
+    : ext === 'js' || ext === 'jsx' ? '#fbbf24' : ext === 'ts' || ext === 'tsx' ? '#60a5fa'
+    : ext === 'json' ? '#a3e635' : ext === 'css' ? '#c084fc' : '#9ca3af'
   return <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
 }
-const Plus = () => <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-const FolderPlus = () => <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>
-const SaveIcon = () => <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-const ChevronRight = () => <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="9 18 15 12 9 6"/></svg>
-const ChevronDown = () => <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9"/></svg>
-const Trash = () => <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-const EditIcon = () => <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
 
-// ── virtual filesystem via localStorage ──────────────────────────────────────
-const LS_TREE = 'bwEditorTree'      // [{id, name, path, type:'file'|'folder', parentPath}]
-const LS_FILE = (path) => `bwEditorFile:${path}`
+const Icon = ({ d, w = 14, h = 14, title }) => (
+  <svg width={w} height={h} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" title={title}>
+    {Array.isArray(d) ? d.map((p, i) => p.startsWith('M') || p.startsWith('L') || p.startsWith('C') || p.startsWith('A')
+      ? <path key={i} d={p} /> : <polyline key={i} points={p} />)
+      : <path d={d} />}
+  </svg>
+)
 
-function loadTree() {
-  try { return JSON.parse(localStorage.getItem(LS_TREE)) || [] } catch { return [] }
-}
-function saveTree(tree) { localStorage.setItem(LS_TREE, JSON.stringify(tree)) }
-function loadFile(path) { return localStorage.getItem(LS_FILE(path)) || '' }
-function saveFile(path, content) { localStorage.setItem(LS_FILE(path), content) }
-function deleteFile(path) { localStorage.removeItem(LS_FILE(path)) }
-function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2) }
+const PlusIco    = () => <Icon d="M12 5v14M5 12h14" />
+const FolderPlus = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>
+const TrashIco   = () => <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+const ChevR      = () => <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+const ChevD      = () => <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+const SaveIco    = () => <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+const MenuIco    = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+const FullIco    = () => <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+const ExitFull   = () => <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/></svg>
+const SearchIco  = () => <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+const CloseIco   = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+const DownloadIco= () => <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
 
-function getExt(name) { const p = name.lastIndexOf('.'); return p > 0 ? name.slice(p + 1).toLowerCase() : '' }
-function isMarkdown(name) { return ['md', 'markdown'].includes(getExt(name)) }
-function isText(name) { return ['md', 'markdown', 'txt', 'html', 'htm', 'js', 'jsx', 'ts', 'tsx', 'css', 'json', 'xml', 'csv', 'sh', 'py', 'rb', 'go'].includes(getExt(name)) }
+// ── file type helpers ─────────────────────────────────────────────────────────
+const getExt = (name) => { const p = name.lastIndexOf('.'); return p > 0 ? name.slice(p + 1).toLowerCase() : '' }
+const isMarkdown = (name) => ['md', 'markdown'].includes(getExt(name))
+const isHtml     = (name) => ['html', 'htm'].includes(getExt(name))
+const isText     = (name) => ['md','markdown','txt','html','htm','js','jsx','ts','tsx','css','json','xml','csv','sh','py','rb','go','yaml','yml','toml','sql'].includes(getExt(name))
 
-// ── simple markdown renderer ─────────────────────────────────────────────────
+// ── simple markdown renderer ──────────────────────────────────────────────────
 function renderMd(md) {
   if (!md) return ''
   let html = md
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/^#{6}\s+(.+)$/gm, '<h6>$1</h6>')
-    .replace(/^#{5}\s+(.+)$/gm, '<h5>$1</h5>')
-    .replace(/^#{4}\s+(.+)$/gm, '<h4>$1</h4>')
-    .replace(/^###\s+(.+)$/gm, '<h3>$1</h3>')
-    .replace(/^##\s+(.+)$/gm, '<h2>$1</h2>')
-    .replace(/^#\s+(.+)$/gm, '<h1>$1</h1>')
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*(.+?)\*/g, '<em>$1</em>')
-    .replace(/`(.+?)`/g, '<code>$1</code>')
-    .replace(/^---$/gm, '<hr>')
-    .replace(/\[(.+?)\]\((.+?)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
-    .replace(/^[-*]\s+(.+)$/gm, '<li>$1</li>')
-    .replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>')
-    .replace(/^\d+\.\s+(.+)$/gm, '<li>$1</li>')
-    .replace(/\n\n/g, '</p><p>')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/```([\w]*)\n([\s\S]*?)```/g, (_, lang, code) =>
+      `<pre class="md-code-block"><code class="lang-${lang}">${code.trimEnd()}</code></pre>`)
+    .replace(/^#{6}\s+(.+)$/gm,'<h6>$1</h6>')
+    .replace(/^#{5}\s+(.+)$/gm,'<h5>$1</h5>')
+    .replace(/^#{4}\s+(.+)$/gm,'<h4>$1</h4>')
+    .replace(/^###\s+(.+)$/gm,'<h3>$1</h3>')
+    .replace(/^##\s+(.+)$/gm,'<h2>$1</h2>')
+    .replace(/^#\s+(.+)$/gm,'<h1>$1</h1>')
+    .replace(/^>\s+(.+)$/gm,'<blockquote>$1</blockquote>')
+    .replace(/^---+$/gm,'<hr>')
+    .replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g,'<em>$1</em>')
+    .replace(/~~(.+?)~~/g,'<del>$1</del>')
+    .replace(/`([^`]+)`/g,'<code>$1</code>')
+    .replace(/\[(.+?)\]\((.+?)\)/g,'<a href="$2" target="_blank" rel="noopener">$1</a>')
+    .replace(/^[-*]\s+(.+)$/gm,'<li>$1</li>')
+    .replace(/(<li>.*<\/li>\n?)+/g, s => `<ul>${s}</ul>`)
+    .replace(/^\d+\.\s+(.+)$/gm,'<li>$1</li>')
+    .replace(/\n\n/g,'</p><p>')
   return `<p>${html}</p>`
 }
 
@@ -69,15 +79,16 @@ function ContextMenu({ menu, onClose }) {
     <div className="context-menu animate-scaleIn" style={{ left: menu.x, top: menu.y, zIndex: 500 }}>
       {menu.items.map((item, i) => item.sep
         ? <div key={i} className="border-t border-white/5 my-1" />
-        : <div key={i} onClick={e => { e.stopPropagation(); item.action(); onClose() }} className={`context-menu-item ${item.danger ? 'danger' : ''}`}>{item.label}</div>
+        : <div key={i} onClick={e => { e.stopPropagation(); item.action(); onClose() }}
+            className={`context-menu-item ${item.danger ? 'danger' : ''}`}>{item.label}</div>
       )}
     </div>
   )
 }
 
-// ── file tree node ────────────────────────────────────────────────────────────
-function TreeNode({ node, tree, depth = 0, activeFile, openFolders, onSelect, onToggle, onCtx, renaming, renameValue, setRenameValue, onRenameBlur, onRenameKey }) {
-  const children = tree.filter(n => n.parentPath === node.path).sort((a, b) => {
+// ── tree node ─────────────────────────────────────────────────────────────────
+function TreeNode({ node, files, depth = 0, activeFile, openFolders, onSelect, onToggle, onCtx, renaming, renameValue, setRenameValue, onRenameBlur, onRenameKey }) {
+  const children = files.filter(n => n.parent_path === node.path).sort((a, b) => {
     if (a.type !== b.type) return a.type === 'folder' ? -1 : 1
     return a.name.localeCompare(b.name)
   })
@@ -88,20 +99,18 @@ function TreeNode({ node, tree, depth = 0, activeFile, openFolders, onSelect, on
   return (
     <div>
       <div
-        className={`flex items-center gap-1.5 py-1.5 sm:py-0.5 px-2 rounded cursor-pointer group transition-all editor-file-item ${isActive ? 'bg-brand-accent/15 text-white' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5 active:bg-white/10'}`}
+        className={`flex items-center gap-1.5 py-1.5 sm:py-0.5 px-2 rounded cursor-pointer group transition-all
+          ${isActive ? 'bg-brand-accent/15 text-white' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5 active:bg-white/10'}`}
         style={{ paddingLeft: `${8 + depth * 14}px` }}
         onClick={() => node.type === 'folder' ? onToggle(node.path) : onSelect(node)}
         onContextMenu={e => { e.preventDefault(); e.stopPropagation(); onCtx(e, node) }}
       >
         {node.type === 'folder' && (
           <span className="text-gray-600 w-3 flex-shrink-0">
-            {isOpen ? <ChevronDown /> : <ChevronRight />}
+            {isOpen ? <ChevD /> : <ChevR />}
           </span>
         )}
-        {node.type === 'folder'
-          ? <FolderIcon open={isOpen} />
-          : <FileIcon ext={ext} />
-        }
+        {node.type === 'folder' ? <FolderIcon open={isOpen} /> : <FileIcon ext={ext} />}
         {renaming?.path === node.path ? (
           <input
             autoFocus
@@ -113,417 +122,549 @@ function TreeNode({ node, tree, depth = 0, activeFile, openFolders, onSelect, on
             className="flex-1 bg-black/40 border border-brand-accent/40 outline-none px-1 rounded text-white text-xs"
           />
         ) : (
-          <span className="flex-1 text-xs truncate">{node.name}</span>
+          <span className="flex-1 text-xs truncate select-none">{node.name}</span>
         )}
-        {node.type === 'file' && isActive && <span className="modified-dot opacity-0" id={`dot-${node.path}`} />}
       </div>
       {node.type === 'folder' && isOpen && children.map(child => (
-        <TreeNode
-          key={child.id}
-          node={child}
-          tree={tree}
-          depth={depth + 1}
-          activeFile={activeFile}
-          openFolders={openFolders}
-          onSelect={onSelect}
-          onToggle={onToggle}
-          onCtx={onCtx}
-          renaming={renaming}
-          renameValue={renameValue}
-          setRenameValue={setRenameValue}
-          onRenameBlur={onRenameBlur}
-          onRenameKey={onRenameKey}
+        <TreeNode key={child.id} node={child} files={files} depth={depth + 1}
+          activeFile={activeFile} openFolders={openFolders}
+          onSelect={onSelect} onToggle={onToggle} onCtx={onCtx}
+          renaming={renaming} renameValue={renameValue}
+          setRenameValue={setRenameValue} onRenameBlur={onRenameBlur} onRenameKey={onRenameKey}
         />
       ))}
     </div>
   )
 }
 
+// ── toolbar button ────────────────────────────────────────────────────────────
+function TB({ onClick, title, active, children }) {
+  return (
+    <button
+      onMouseDown={e => { e.preventDefault(); onClick() }}
+      title={title}
+      className={`px-1.5 py-1 rounded text-xs transition-all select-none
+        ${active ? 'bg-brand-accent/30 text-brand-accent' : 'text-gray-400 hover:text-white hover:bg-white/10'}`}
+    >
+      {children}
+    </button>
+  )
+}
+
+// ── stat helpers ──────────────────────────────────────────────────────────────
+function getWordCount(text) { return text.trim().split(/\s+/).filter(Boolean).length }
+function getReadTime(text) { return Math.max(1, Math.round(getWordCount(text) / 200)) }
+function getCursorPos(text, idx) {
+  const lines = text.slice(0, idx).split('\n')
+  return { line: lines.length, col: lines[lines.length - 1].length + 1 }
+}
+
 // ── main component ────────────────────────────────────────────────────────────
 export default function Editor({ userId }) {
-  const [tree, setTree] = useState(() => loadTree())
-  const [activeFile, setActiveFile] = useState(null)  // { path, name, content }
-  const [viewMode, setViewMode] = useState('source')  // 'source' | 'preview' | 'split'
-  const [openFolders, setOpenFolders] = useState(new Set())
-  const [modified, setModified] = useState(false)
-  const [saveFlash, setSaveFlash] = useState(false)
-  const [contextMenu, setContextMenu] = useState(null)
-  const [renaming, setRenaming] = useState(null)  // { path, name }
-  const [renameValue, setRenameValue] = useState('')
-  const [newItemTarget, setNewItemTarget] = useState(null)  // { parentPath, type:'file'|'folder' }
-  const [newItemName, setNewItemName] = useState('')
-  const [leftW, setLeftW] = useState(() => parseInt(localStorage.getItem('bwEditorLeftW') || '260', 10))
-  const [showMobileSidebar, setShowMobileSidebar] = useState(false)
-  const resizing = useRef(false)
-  const textareaRef = useRef(null)
+  const { files, loading, createNode, saveContent, deleteNode, renameNode } = useEditorFiles(userId)
 
+  const [activeFile, setActiveFile] = useState(null)   // { path, name }
+  const [content, setContent]       = useState('')      // current editor content (live)
+  const [savedContent, setSavedContent] = useState('')  // last saved snapshot
+  const [saveStatus, setSaveStatus] = useState('saved') // 'saved' | 'saving' | 'modified'
+  const [openFolders, setOpenFolders] = useState(new Set())
+  const [contextMenu, setContextMenu] = useState(null)
+  const [renaming, setRenaming]     = useState(null)
+  const [renameValue, setRenameValue] = useState('')
+  const [newItemTarget, setNewItemTarget] = useState(null)
+  const [newItemName, setNewItemName] = useState('')
+  const [viewMode, setViewMode]     = useState('source')
+  const [leftW, setLeftW]           = useState(() => parseInt(localStorage.getItem('bwEditorLeftW') || '240', 10))
+  const [showMobileSidebar, setShowMobileSidebar] = useState(false)
+  const [fullScreen, setFullScreen] = useState(false)
+  const [showFind, setShowFind]     = useState(false)
+  const [findQuery, setFindQuery]   = useState('')
+  const [cursorPos, setCursorPos]   = useState({ line: 1, col: 1 })
+  const [openTabs, setOpenTabs]     = useState([]) // [{path, name}]
+
+  const textareaRef = useRef(null)
+  const saveTimer   = useRef(null)
+  const resizing    = useRef(false)
+
+  // persist panel width
   useEffect(() => { localStorage.setItem('bwEditorLeftW', String(leftW)) }, [leftW])
 
-  // Force off split-mode on mobile (no room for it)
-  useEffect(() => {
-    const onResize = () => {
-      if (window.innerWidth < 640 && viewMode === 'split') setViewMode('source')
-    }
-    onResize()
-    window.addEventListener('resize', onResize)
-    return () => window.removeEventListener('resize', onResize)
-  }, [viewMode])
-
-  // Auto-close mobile drawer when a file is opened
+  // close drawer when file opens
   useEffect(() => { if (activeFile) setShowMobileSidebar(false) }, [activeFile?.path])
 
-  // ── tree operations ──────────────────────────────────────
-  function addNode(name, type, parentPath = '') {
-    if (!name.trim()) return null
-    const path = parentPath ? `${parentPath}/${name.trim()}` : name.trim()
-    if (tree.some(n => n.path === path)) return null
-    const node = { id: uid(), name: name.trim(), path, type, parentPath }
-    const next = [...tree, node]
-    setTree(next); saveTree(next)
-    if (type === 'file') saveFile(path, '')
-    return node
-  }
+  // force off split on mobile
+  useEffect(() => {
+    const fn = () => { if (window.innerWidth < 640 && viewMode === 'split') setViewMode('source') }
+    fn(); window.addEventListener('resize', fn)
+    return () => window.removeEventListener('resize', fn)
+  }, [viewMode])
 
-  function removeNode(path) {
-    // Remove node and all descendants
-    const toRemove = new Set()
-    const collect = (p) => {
-      toRemove.add(p)
-      tree.filter(n => n.parentPath === p).forEach(n => collect(n.path))
-    }
-    collect(path)
-    toRemove.forEach(p => {
-      const n = tree.find(t => t.path === p)
-      if (n?.type === 'file') deleteFile(p)
-    })
-    const next = tree.filter(n => !toRemove.has(n.path))
-    setTree(next); saveTree(next)
-    if (activeFile && toRemove.has(activeFile.path)) setActiveFile(null)
-  }
+  // sync content when active file changes
+  useEffect(() => {
+    if (!activeFile) return
+    const f = files.find(f => f.path === activeFile.path)
+    if (f) { setContent(f.content || ''); setSavedContent(f.content || ''); setSaveStatus('saved') }
+  }, [activeFile?.path, files])
 
-  function renameNode(path, newName) {
-    if (!newName.trim() || newName === renaming?.name) { setRenaming(null); return }
-    const node = tree.find(n => n.path === path)
-    if (!node) { setRenaming(null); return }
-    const parentPath = node.parentPath
-    const newPath = parentPath ? `${parentPath}/${newName.trim()}` : newName.trim()
-    if (tree.some(n => n.path === newPath)) { setRenaming(null); return }
+  // auto-save debounce (1.2s)
+  useEffect(() => {
+    if (!activeFile) return
+    if (content === savedContent) { setSaveStatus('saved'); return }
+    setSaveStatus('modified')
+    clearTimeout(saveTimer.current)
+    saveTimer.current = setTimeout(async () => {
+      setSaveStatus('saving')
+      await saveContent(activeFile.path, content)
+      setSavedContent(content)
+      setSaveStatus('saved')
+    }, 1200)
+    return () => clearTimeout(saveTimer.current)
+  }, [content])
 
-    // Move content if file
-    if (node.type === 'file') {
-      const content = loadFile(path)
-      saveFile(newPath, content)
-      deleteFile(path)
-    }
-
-    // Update all paths that start with old path
-    const next = tree.map(n => {
-      if (n.path === path) return { ...n, name: newName.trim(), path: newPath }
-      if (n.parentPath === path) return { ...n, parentPath: newPath }
-      if (n.path.startsWith(path + '/')) return { ...n, path: n.path.replace(path, newPath), parentPath: n.parentPath.replace(path, newPath) }
-      return n
-    })
-    setTree(next); saveTree(next)
-    if (activeFile?.path === path) setActiveFile(f => ({ ...f, path: newPath, name: newName.trim() }))
-    setRenaming(null)
-  }
-
-  // ── file selection ───────────────────────────────────────
-  function openFile(node) {
-    if (!isText(node.name)) return
-    const content = loadFile(node.path)
-    setActiveFile({ path: node.path, name: node.name, content })
-    setModified(false)
-    if (isMarkdown(node.name)) setViewMode('split')
-    else setViewMode('source')
-  }
-
-  // ── save ─────────────────────────────────────────────────
-  const save = useCallback(() => {
-    if (!activeFile || !modified) return
-    saveFile(activeFile.path, activeFile.content)
-    setModified(false)
-    setSaveFlash(true)
-    setTimeout(() => setSaveFlash(false), 600)
-  }, [activeFile, modified])
-
-  // Ctrl+S
+  // keyboard shortcuts
   useEffect(() => {
     const fn = (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); save() }
+      const mod = e.ctrlKey || e.metaKey
+      if (mod && e.key === 's') { e.preventDefault(); forceSave() }
+      if (mod && e.key === 'f') { e.preventDefault(); setShowFind(v => !v) }
+      if (mod && e.key === 'b') { e.preventDefault(); applyFormat('bold') }
+      if (mod && e.key === 'i') { e.preventDefault(); applyFormat('italic') }
+      if (mod && e.key === 'k') { e.preventDefault(); applyFormat('link') }
+      if (e.key === 'Escape') { setShowFind(false); setFullScreen(false) }
     }
     window.addEventListener('keydown', fn)
     return () => window.removeEventListener('keydown', fn)
-  }, [save])
+  }, [content, savedContent, activeFile])
 
-  // ── panel resize ─────────────────────────────────────────
-  function startResize(e) {
-    e.preventDefault()
-    resizing.current = true
-    const startX = e.clientX, startW = leftW
-    const onMove = (e) => {
-      if (!resizing.current) return
-      setLeftW(Math.max(160, Math.min(500, startW + (e.clientX - startX))))
-    }
-    const onUp = () => { resizing.current = false; document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp) }
-    document.addEventListener('mousemove', onMove)
-    document.addEventListener('mouseup', onUp)
+  // ── file actions ─────────────────────────────────────────────────────────
+  async function openFile(node) {
+    if (!isText(node.name)) return
+    setActiveFile({ path: node.path, name: node.name })
+    if (isMarkdown(node.name)) setViewMode('split')
+    else setViewMode('source')
+    // open tabs
+    setOpenTabs(prev => {
+      const filtered = prev.filter(t => t.path !== node.path)
+      return [{ path: node.path, name: node.name }, ...filtered].slice(0, 6)
+    })
   }
 
-  // ── context menu helpers ─────────────────────────────────
-  function showCtx(e, items) {
-    e.preventDefault(); e.stopPropagation()
-    setContextMenu({ x: e.clientX, y: e.clientY, items })
+  async function forceSave() {
+    if (!activeFile) return
+    clearTimeout(saveTimer.current)
+    setSaveStatus('saving')
+    await saveContent(activeFile.path, content)
+    setSavedContent(content)
+    setSaveStatus('saved')
   }
 
-  function nodeCtx(e, node) {
-    const items = node.type === 'folder' ? [
-      { label: 'New File', action: () => { setNewItemTarget({ parentPath: node.path, type: 'file' }); setNewItemName(''); setOpenFolders(s => new Set([...s, node.path])) } },
-      { label: 'New Folder', action: () => { setNewItemTarget({ parentPath: node.path, type: 'folder' }); setNewItemName(''); setOpenFolders(s => new Set([...s, node.path])) } },
-      { sep: true },
-      { label: 'Rename', action: () => { setRenaming({ path: node.path, name: node.name }); setRenameValue(node.name) } },
-      { label: 'Delete', danger: true, action: () => { if (confirm(`Delete "${node.name}"?`)) removeNode(node.path) } },
-    ] : [
-      ...(isText(node.name) ? [{ label: 'Open', action: () => openFile(node) }] : []),
-      { sep: true },
-      { label: 'Rename', action: () => { setRenaming({ path: node.path, name: node.name }); setRenameValue(node.name) } },
-      { label: 'Delete', danger: true, action: () => { if (confirm(`Delete "${node.name}"?`)) removeNode(node.path) } },
-    ]
-    showCtx(e, items)
-  }
-
-  // ── new item inline input ────────────────────────────────
-  function commitNewItem() {
+  // ── create ────────────────────────────────────────────────────────────────
+  async function commitNewItem() {
     if (!newItemName.trim() || !newItemTarget) { setNewItemTarget(null); return }
-    const node = addNode(newItemName.trim(), newItemTarget.type, newItemTarget.parentPath)
+    const node = await createNode(newItemName.trim(), newItemTarget.type, newItemTarget.parentPath)
     if (node && node.type === 'file') openFile(node)
     setNewItemTarget(null); setNewItemName('')
   }
 
-  // ── root children ────────────────────────────────────────
-  const roots = tree.filter(n => n.parentPath === '').sort((a, b) => {
+  // ── delete ────────────────────────────────────────────────────────────────
+  async function handleDelete(path, name) {
+    if (!confirm(`Delete "${name}"?`)) return
+    if (activeFile?.path === path || activeFile?.path.startsWith(path + '/')) {
+      setActiveFile(null)
+      setOpenTabs(prev => prev.filter(t => t.path !== path && !t.path.startsWith(path + '/')))
+    }
+    await deleteNode(path)
+  }
+
+  // ── rename ────────────────────────────────────────────────────────────────
+  async function commitRename() {
+    if (!renaming) return
+    const result = await renameNode(renaming.path, renameValue)
+    if (result && activeFile?.path === renaming.path) {
+      setActiveFile({ path: result.path, name: result.name })
+      setOpenTabs(prev => prev.map(t => t.path === renaming.path ? { path: result.path, name: result.name } : t))
+    }
+    setRenaming(null)
+  }
+
+  // ── panel resize ──────────────────────────────────────────────────────────
+  function startResize(e) {
+    e.preventDefault(); resizing.current = true
+    const startX = e.clientX, startW = leftW
+    const onMove = e => { if (resizing.current) setLeftW(Math.max(160, Math.min(500, startW + e.clientX - startX))) }
+    const onUp   = () => { resizing.current = false; document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp) }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  }
+
+  // ── context menu ─────────────────────────────────────────────────────────
+  function showCtx(e, items) {
+    e.preventDefault(); e.stopPropagation()
+    setContextMenu({ x: Math.min(e.clientX, window.innerWidth - 180), y: Math.min(e.clientY, window.innerHeight - 200), items })
+  }
+  function nodeCtx(e, node) {
+    showCtx(e, node.type === 'folder' ? [
+      { label: '📄 New File',   action: () => { setNewItemTarget({ parentPath: node.path, type: 'file' }); setNewItemName(''); setOpenFolders(s => new Set([...s, node.path])) } },
+      { label: '📁 New Folder', action: () => { setNewItemTarget({ parentPath: node.path, type: 'folder' }); setNewItemName(''); setOpenFolders(s => new Set([...s, node.path])) } },
+      { sep: true },
+      { label: 'Rename', action: () => { setRenaming({ path: node.path, name: node.name }); setRenameValue(node.name) } },
+      { label: 'Delete', danger: true, action: () => handleDelete(node.path, node.name) },
+    ] : [
+      ...(isText(node.name) ? [{ label: 'Open', action: () => openFile(node) }] : []),
+      { sep: true },
+      { label: 'Rename', action: () => { setRenaming({ path: node.path, name: node.name }); setRenameValue(node.name) } },
+      { label: 'Delete', danger: true, action: () => handleDelete(node.path, node.name) },
+    ])
+  }
+
+  // ── markdown formatting ───────────────────────────────────────────────────
+  function applyFormat(fmt) {
+    const ta = textareaRef.current
+    if (!ta) return
+    const { selectionStart: ss, selectionEnd: se, value } = ta
+    const sel = value.slice(ss, se)
+    const before = value.slice(0, ss)
+    const after  = value.slice(se)
+    let insert = '', cursorAt
+
+    switch (fmt) {
+      case 'bold':        insert = `**${sel || 'bold text'}**`;        cursorAt = ss + 2 + (sel.length || 9); break
+      case 'italic':      insert = `*${sel || 'italic text'}*`;         cursorAt = ss + 1 + (sel.length || 11); break
+      case 'strike':      insert = `~~${sel || 'strikethrough'}~~`;    cursorAt = ss + 2 + (sel.length || 13); break
+      case 'code':        insert = sel.includes('\n') ? `\`\`\`\n${sel || 'code'}\n\`\`\`` : `\`${sel || 'code'}\``; cursorAt = ss + insert.length; break
+      case 'link': {
+        const url = 'https://'
+        insert = `[${sel || 'link text'}](${url})`
+        cursorAt = ss + insert.length - 1
+        break
+      }
+      case 'image':       insert = `![${sel || 'alt text'}](https://)`; cursorAt = ss + insert.length - 1; break
+      case 'h1':          insert = wrapLine(before, sel || 'Heading 1', after, '# ');   cursorAt = ss + insert.length; break
+      case 'h2':          insert = wrapLine(before, sel || 'Heading 2', after, '## ');  cursorAt = ss + insert.length; break
+      case 'h3':          insert = wrapLine(before, sel || 'Heading 3', after, '### '); cursorAt = ss + insert.length; break
+      case 'quote':       insert = wrapLine(before, sel || 'quote', after, '> ');        cursorAt = ss + insert.length; break
+      case 'ul':          insert = wrapLine(before, sel || 'item', after, '- ');         cursorAt = ss + insert.length; break
+      case 'ol':          insert = wrapLine(before, sel || 'item', after, '1. ');        cursorAt = ss + insert.length; break
+      case 'hr':          insert = '\n---\n';                                            cursorAt = ss + insert.length; break
+      case 'table': {
+        insert = `\n| Column 1 | Column 2 | Column 3 |\n|---|---|---|\n| Cell | Cell | Cell |\n`
+        cursorAt = ss + insert.length
+        break
+      }
+      default: return
+    }
+
+    const newVal = before + insert + after
+    setContent(newVal)
+    setTimeout(() => { ta.focus(); ta.setSelectionRange(cursorAt, cursorAt) }, 0)
+  }
+
+  function wrapLine(before, sel, after, prefix) {
+    // Add prefix at start of line
+    const lineStart = before.lastIndexOf('\n') + 1
+    return before.slice(lineStart) === '' ? prefix + sel : '\n' + prefix + sel
+  }
+
+  // ── tab key → indent ──────────────────────────────────────────────────────
+  function handleKeyDown(e) {
+    if (e.key === 'Tab') {
+      e.preventDefault()
+      const ta = e.target
+      const { selectionStart: ss, selectionEnd: se, value } = ta
+      const spaces = '  '
+      if (e.shiftKey) {
+        // un-indent
+        const lineStart = value.lastIndexOf('\n', ss - 1) + 1
+        if (value.slice(lineStart, lineStart + 2) === spaces) {
+          const newVal = value.slice(0, lineStart) + value.slice(lineStart + 2)
+          setContent(newVal)
+          setTimeout(() => { ta.setSelectionRange(ss - 2, se - 2) }, 0)
+        }
+      } else {
+        const newVal = value.slice(0, ss) + spaces + value.slice(se)
+        setContent(newVal)
+        setTimeout(() => { ta.setSelectionRange(ss + 2, ss + 2) }, 0)
+      }
+    }
+  }
+
+  // ── download file ─────────────────────────────────────────────────────────
+  function downloadFile() {
+    if (!activeFile) return
+    const blob = new Blob([content], { type: 'text/plain' })
+    const url  = URL.createObjectURL(blob)
+    const a    = document.createElement('a'); a.href = url; a.download = activeFile.name; a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  // ── find highlight ────────────────────────────────────────────────────────
+  const matchCount = findQuery && content
+    ? (content.match(new RegExp(findQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi')) || []).length
+    : 0
+
+  // ── tree roots ────────────────────────────────────────────────────────────
+  const roots = files.filter(n => n.parent_path === '').sort((a, b) => {
     if (a.type !== b.type) return a.type === 'folder' ? -1 : 1
     return a.name.localeCompare(b.name)
   })
 
-  // ── render ───────────────────────────────────────────────
+  const isMd   = activeFile && isMarkdown(activeFile.name)
+  const isHtml_ = activeFile && isHtml(activeFile.name)
+  const canPreview = isMd || isHtml_
+  const words  = getWordCount(content)
+
+  const statusColor = saveStatus === 'saved' ? 'text-brand-success' : saveStatus === 'saving' ? 'text-brand-accent' : 'text-gray-500'
+  const statusLabel = saveStatus === 'saved' ? '✓ Saved' : saveStatus === 'saving' ? 'Saving…' : '● Unsaved'
+
+  // ── sidebar JSX (shared desktop + drawer) ────────────────────────────────
+  const sidebarContent = (
+    <div className="glass-card sm:rounded-lg p-3 flex flex-col overflow-hidden h-full w-full">
+      <div className="flex items-center justify-between mb-3 shrink-0">
+        <span className="text-white text-sm font-semibold">Files</span>
+        <div className="flex gap-0.5">
+          <button onClick={() => { setNewItemTarget({ parentPath: '', type: 'file' }); setNewItemName('') }} className="nav-icon" title="New File"><PlusIco /></button>
+          <button onClick={() => { setNewItemTarget({ parentPath: '', type: 'folder' }); setNewItemName('') }} className="nav-icon" title="New Folder"><FolderPlus /></button>
+        </div>
+      </div>
+
+      {/* Root new-item input */}
+      {newItemTarget?.parentPath === '' && (
+        <div className="mb-2 shrink-0">
+          <input autoFocus value={newItemName} onChange={e => setNewItemName(e.target.value)}
+            onBlur={commitNewItem}
+            onKeyDown={e => { if (e.key === 'Enter') commitNewItem(); if (e.key === 'Escape') { setNewItemTarget(null); setNewItemName('') } }}
+            placeholder={newItemTarget.type === 'folder' ? 'Folder name…' : 'filename.md'}
+            className="w-full bg-black/30 border border-brand-accent/40 rounded px-2 py-1 text-white text-xs outline-none"
+          />
+        </div>
+      )}
+
+      {/* Tree */}
+      <div className="flex-1 overflow-y-auto">
+        {roots.length === 0 && !newItemTarget && (
+          <p className="text-gray-600 text-xs text-center py-6 leading-relaxed">No files yet.<br />Use the + buttons above.</p>
+        )}
+        {roots.map(node => (
+          <div key={node.id}>
+            <TreeNode
+              node={node} files={files} activeFile={activeFile}
+              openFolders={openFolders}
+              onSelect={openFile}
+              onToggle={path => setOpenFolders(s => { const n = new Set(s); n.has(path) ? n.delete(path) : n.add(path); return n })}
+              onCtx={nodeCtx}
+              renaming={renaming} renameValue={renameValue}
+              setRenameValue={setRenameValue}
+              onRenameBlur={commitRename}
+              onRenameKey={e => { if (e.key === 'Enter') commitRename(); if (e.key === 'Escape') setRenaming(null) }}
+            />
+            {/* Nested new-item input */}
+            {newItemTarget?.parentPath === node.path && openFolders.has(node.path) && (
+              <div style={{ paddingLeft: '22px' }}>
+                <input autoFocus value={newItemName}
+                  onChange={e => setNewItemName(e.target.value)}
+                  onBlur={commitNewItem}
+                  onKeyDown={e => { if (e.key === 'Enter') commitNewItem(); if (e.key === 'Escape') { setNewItemTarget(null); setNewItemName('') } }}
+                  placeholder={newItemTarget.type === 'folder' ? 'folder name' : 'file.md'}
+                  className="w-full bg-black/30 border border-brand-accent/40 rounded px-2 py-0.5 text-white text-xs outline-none my-0.5"
+                />
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+
+  if (loading) return (
+    <div className="p-4 pt-6 flex items-center justify-center h-[calc(100vh-136px)] sm:h-[calc(100vh-40px)]">
+      <span className="text-gray-600 text-sm">Loading files…</span>
+    </div>
+  )
+
+  // ── render ────────────────────────────────────────────────────────────────
   return (
     <div
-      className="p-3 pt-4 sm:p-4 sm:pt-6 animate-fadeIn flex gap-3 h-[calc(100vh-136px)] sm:h-[calc(100vh-40px)]"
+      className={`${fullScreen ? 'fixed inset-0 z-[60] bg-brand-bg' : 'p-3 pt-4 sm:p-4 sm:pt-6 h-[calc(100vh-136px)] sm:h-[calc(100vh-40px)]'} animate-fadeIn flex gap-3`}
       onContextMenu={e => {
-        if (e.target === e.currentTarget) {
+        if (e.target === e.currentTarget)
           showCtx(e, [
-            { label: 'New File', action: () => { setNewItemTarget({ parentPath: '', type: 'file' }); setNewItemName('') } },
-            { label: 'New Folder', action: () => { setNewItemTarget({ parentPath: '', type: 'folder' }); setNewItemName('') } },
+            { label: '📄 New File',   action: () => { setNewItemTarget({ parentPath: '', type: 'file' }); setNewItemName('') } },
+            { label: '📁 New Folder', action: () => { setNewItemTarget({ parentPath: '', type: 'folder' }); setNewItemName('') } },
           ])
-        }
       }}
     >
       <ContextMenu menu={contextMenu} onClose={() => setContextMenu(null)} />
 
-      {/* ── Mobile drawer backdrop ── */}
+      {/* Mobile drawer backdrop */}
       {showMobileSidebar && (
-        <div
-          className="drawer-backdrop sm:hidden"
-          onClick={() => setShowMobileSidebar(false)}
-        />
+        <div className="drawer-backdrop sm:hidden" onClick={() => setShowMobileSidebar(false)} />
       )}
 
-      {/* ── LEFT SIDEBAR ── */}
+      {/* LEFT SIDEBAR */}
       <div
         className={`${showMobileSidebar ? 'drawer-panel' : 'hidden'} sm:flex sm:relative sm:flex-shrink-0 sm:flex-col sm:overflow-hidden`}
         style={typeof window !== 'undefined' && window.innerWidth >= 640 ? { width: leftW + 'px' } : {}}
       >
-        <div className="glass-card sm:rounded-lg p-3 flex flex-col overflow-hidden h-full w-full">
-          {/* Header */}
-          <div className="flex items-center justify-between mb-3 shrink-0">
-            <span className="text-white text-sm font-semibold">Files</span>
-            <div className="flex gap-1">
-              <button
-                onClick={() => { setNewItemTarget({ parentPath: '', type: 'file' }); setNewItemName('') }}
-                className="nav-icon" title="New File"
-              >
-                <Plus />
-              </button>
-              <button
-                onClick={() => { setNewItemTarget({ parentPath: '', type: 'folder' }); setNewItemName('') }}
-                className="nav-icon" title="New Folder"
-              >
-                <FolderPlus />
-              </button>
-            </div>
-          </div>
-
-          {/* New item input */}
-          {newItemTarget && newItemTarget.parentPath === '' && (
-            <div className="mb-2 px-2 shrink-0">
-              <input
-                autoFocus
-                value={newItemName}
-                onChange={e => setNewItemName(e.target.value)}
-                onBlur={commitNewItem}
-                onKeyDown={e => { if (e.key === 'Enter') commitNewItem(); if (e.key === 'Escape') { setNewItemTarget(null); setNewItemName('') } }}
-                placeholder={newItemTarget.type === 'folder' ? 'Folder name...' : 'file.md'}
-                className="w-full bg-black/30 border border-brand-accent/40 rounded px-2 py-1 text-white text-xs outline-none placeholder-gray-600"
-              />
-            </div>
-          )}
-
-          {/* Tree */}
-          <div className="flex-1 overflow-y-auto">
-            {roots.length === 0 && !newItemTarget && (
-              <p className="text-gray-600 text-xs text-center py-6 leading-relaxed">No files yet.<br />Right-click or use the + buttons above.</p>
-            )}
-            {roots.map(node => (
-              <div key={node.id}>
-                <TreeNode
-                  node={node}
-                  tree={tree}
-                  activeFile={activeFile}
-                  openFolders={openFolders}
-                  onSelect={openFile}
-                  onToggle={path => setOpenFolders(s => { const n = new Set(s); n.has(path) ? n.delete(path) : n.add(path); return n })}
-                  onCtx={nodeCtx}
-                  renaming={renaming}
-                  renameValue={renameValue}
-                  setRenameValue={setRenameValue}
-                  onRenameBlur={() => renameNode(renaming?.path, renameValue)}
-                  onRenameKey={e => { if (e.key === 'Enter') renameNode(renaming?.path, renameValue); if (e.key === 'Escape') setRenaming(null) }}
-                />
-                {/* New item inside folder */}
-                {newItemTarget && newItemTarget.parentPath === node.path && openFolders.has(node.path) && (
-                  <div style={{ paddingLeft: '22px' }}>
-                    <input
-                      autoFocus
-                      value={newItemName}
-                      onChange={e => setNewItemName(e.target.value)}
-                      onBlur={commitNewItem}
-                      onKeyDown={e => { if (e.key === 'Enter') commitNewItem(); if (e.key === 'Escape') { setNewItemTarget(null); setNewItemName('') } }}
-                      placeholder={newItemTarget.type === 'folder' ? 'folder name' : 'file.md'}
-                      className="w-full bg-black/30 border border-brand-accent/40 rounded px-2 py-0.5 text-white text-xs outline-none placeholder-gray-600 my-0.5"
-                    />
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
+        {sidebarContent}
       </div>
 
-      {/* Resize handle (desktop only) */}
-      <div
-        onMouseDown={startResize}
-        className="hidden sm:block w-1 flex-shrink-0 cursor-col-resize rounded-full transition-colors hover:bg-brand-accent/30"
+      {/* Resize handle */}
+      <div onMouseDown={startResize}
+        className="hidden sm:block w-1 flex-shrink-0 cursor-col-resize rounded-full hover:bg-brand-accent/30 transition-colors"
         style={{ background: 'rgba(255,255,255,0.04)' }}
       />
 
-      {/* ── RIGHT PANEL ── */}
+      {/* RIGHT PANEL */}
       <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
         {!activeFile ? (
+          /* ── empty state ── */
           <div className="glass-card rounded-lg h-full flex flex-col items-center justify-center text-center p-6 sm:p-8"
             onContextMenu={e => showCtx(e, [
-              { label: 'New File', action: () => { setNewItemTarget({ parentPath: '', type: 'file' }); setNewItemName('') } },
-              { label: 'New Folder', action: () => { setNewItemTarget({ parentPath: '', type: 'folder' }); setNewItemName('') } },
+              { label: '📄 New File',   action: () => { setNewItemTarget({ parentPath: '', type: 'file' }); setNewItemName('') } },
+              { label: '📁 New Folder', action: () => { setNewItemTarget({ parentPath: '', type: 'folder' }); setNewItemName('') } },
             ])}
           >
-            <div className="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center mb-4">
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#4b5563" strokeWidth="1.5">
+            <div className="w-14 h-14 rounded-full bg-white/5 flex items-center justify-center mb-4">
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#374151" strokeWidth="1.5">
                 <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
                 <polyline points="14 2 14 8 20 8"/>
-                <line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/>
+                <line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>
               </svg>
             </div>
-            <p className="text-gray-500 text-sm">Select a file to edit</p>
-            <p className="text-gray-700 text-xs mt-1 hidden sm:block">or right-click to create one</p>
-            <div className="mt-6 flex flex-col sm:flex-row gap-2 w-full max-w-xs">
-              <button
-                onClick={() => setShowMobileSidebar(true)}
-                className="sm:hidden btn-primary flex items-center justify-center gap-1.5 px-3 py-2.5 text-white rounded text-sm"
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
-                Browse Files
-              </button>
-              <button
-                onClick={() => { setNewItemTarget({ parentPath: '', type: 'file' }); setNewItemName(''); setShowMobileSidebar(true) }}
-                className="flex items-center justify-center gap-1.5 px-3 py-2.5 sm:py-1.5 bg-white/5 hover:bg-white/10 active:bg-white/10 text-gray-400 hover:text-white rounded text-xs transition-all"
-              >
-                <Plus /> New File
-              </button>
-              <button
-                onClick={() => { setNewItemTarget({ parentPath: '', type: 'folder' }); setNewItemName(''); setShowMobileSidebar(true) }}
-                className="flex items-center justify-center gap-1.5 px-3 py-2.5 sm:py-1.5 bg-white/5 hover:bg-white/10 active:bg-white/10 text-gray-400 hover:text-white rounded text-xs transition-all"
-              >
-                <FolderPlus /> New Folder
-              </button>
+            <p className="text-gray-400 text-sm font-medium">No file open</p>
+            <p className="text-gray-600 text-xs mt-1 mb-6">Select a file from the sidebar or create one</p>
+            <div className="flex flex-col sm:flex-row gap-2 w-full max-w-xs">
+              <button onClick={() => setShowMobileSidebar(true)}
+                className="sm:hidden btn-primary flex items-center justify-center gap-1.5 px-4 py-2.5 text-white rounded text-sm"
+              ><MenuIco /> Browse Files</button>
+              <button onClick={() => { setNewItemTarget({ parentPath: '', type: 'file' }); setNewItemName(''); setShowMobileSidebar(true) }}
+                className="flex items-center justify-center gap-1.5 px-3 py-2.5 sm:py-1.5 bg-white/5 hover:bg-white/10 text-gray-300 rounded text-sm transition-all"
+              ><PlusIco /> New File</button>
+              <button onClick={() => { setNewItemTarget({ parentPath: '', type: 'folder' }); setNewItemName(''); setShowMobileSidebar(true) }}
+                className="flex items-center justify-center gap-1.5 px-3 py-2.5 sm:py-1.5 bg-white/5 hover:bg-white/10 text-gray-300 rounded text-sm transition-all"
+              ><FolderPlus /> New Folder</button>
             </div>
           </div>
         ) : (
+          /* ── editor panel ── */
           <div className="glass-card rounded-lg flex flex-col overflow-hidden h-full">
-            {/* Editor toolbar */}
-            <div className="flex items-center gap-2 px-2 sm:px-4 py-2 border-b border-white/5 shrink-0">
-              <button
-                onClick={() => setShowMobileSidebar(true)}
-                className="sm:hidden nav-icon flex-shrink-0"
-                title="Show files"
-              >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
-              </button>
-              <div className="flex items-center gap-1.5 flex-1 min-w-0">
+
+            {/* Open file tabs */}
+            {openTabs.length > 1 && (
+              <div className="flex overflow-x-auto shrink-0 border-b border-white/5 px-2 pt-1 gap-1 scrollbar-hide">
+                {openTabs.map(t => (
+                  <button
+                    key={t.path}
+                    onClick={() => openFile(files.find(f => f.path === t.path) || t)}
+                    className={`flex items-center gap-1.5 px-3 py-1 rounded-t text-xs whitespace-nowrap flex-shrink-0 border-b-2 transition-all
+                      ${t.path === activeFile.path ? 'text-white border-brand-accent bg-white/5' : 'text-gray-500 border-transparent hover:text-gray-300 hover:bg-white/5'}`}
+                  >
+                    <FileIcon ext={getExt(t.name)} />
+                    {t.name}
+                    <span
+                      onClick={e => { e.stopPropagation(); setOpenTabs(prev => prev.filter(x => x.path !== t.path)); if (t.path === activeFile.path) setActiveFile(openTabs.find(x => x.path !== t.path) || null) }}
+                      className="text-gray-600 hover:text-white ml-0.5 leading-none"
+                    >×</span>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Toolbar */}
+            <div className="flex items-center gap-1 px-2 sm:px-3 py-1.5 border-b border-white/5 shrink-0 flex-wrap">
+              {/* Hamburger (mobile) */}
+              <button onClick={() => setShowMobileSidebar(true)} className="sm:hidden nav-icon mr-1" title="Files"><MenuIco /></button>
+
+              {/* File name */}
+              <div className="flex items-center gap-1.5 flex-1 min-w-0 mr-2">
                 <FileIcon ext={getExt(activeFile.name)} />
-                <span className="text-white text-sm font-medium truncate">{activeFile.name}</span>
-                {modified && <span className="modified-dot flex-shrink-0" />}
+                <span className="text-white text-xs font-medium truncate">{activeFile.name}</span>
               </div>
 
-              <div className="flex gap-1 shrink-0">
-                {/* View mode tabs (no split on mobile) */}
-                <div className="flex gap-0.5 bg-white/5 rounded p-0.5">
-                  {[
-                    { v: 'source', label: 'Source', mobile: true },
-                    ...(isMarkdown(activeFile.name) || getExt(activeFile.name) === 'html' ? [
-                      { v: 'preview', label: 'Preview', mobile: true },
-                      { v: 'split', label: 'Split', mobile: false },
-                    ] : [])
-                  ].map(({ v, label, mobile }) => (
-                    <button
-                      key={v}
-                      onClick={() => setViewMode(v)}
-                      className={`${mobile ? '' : 'hidden sm:inline'} px-2 py-1 sm:py-0.5 rounded text-xs transition-all ${viewMode === v ? 'bg-brand-accent/80 text-white' : 'text-gray-500 hover:text-gray-300'}`}
-                    >
-                      {label}
-                    </button>
-                  ))}
+              {/* Markdown toolbar */}
+              {isMd && (
+                <div className="flex items-center gap-0.5 flex-wrap">
+                  <TB onClick={() => applyFormat('bold')}   title="Bold (Ctrl+B)"><strong>B</strong></TB>
+                  <TB onClick={() => applyFormat('italic')} title="Italic (Ctrl+I)"><em>I</em></TB>
+                  <TB onClick={() => applyFormat('strike')} title="Strikethrough"><del>S</del></TB>
+                  <div className="w-px h-4 bg-white/10 mx-0.5" />
+                  <TB onClick={() => applyFormat('h1')} title="Heading 1">H1</TB>
+                  <TB onClick={() => applyFormat('h2')} title="Heading 2">H2</TB>
+                  <TB onClick={() => applyFormat('h3')} title="Heading 3">H3</TB>
+                  <div className="w-px h-4 bg-white/10 mx-0.5" />
+                  <TB onClick={() => applyFormat('code')}  title="Code">&lt;/&gt;</TB>
+                  <TB onClick={() => applyFormat('link')}  title="Link (Ctrl+K)">🔗</TB>
+                  <TB onClick={() => applyFormat('quote')} title="Blockquote">"</TB>
+                  <TB onClick={() => applyFormat('ul')}    title="Bullet list">•</TB>
+                  <TB onClick={() => applyFormat('ol')}    title="Numbered list">1.</TB>
+                  <TB onClick={() => applyFormat('table')} title="Table">⊞</TB>
+                  <TB onClick={() => applyFormat('hr')}    title="Divider">—</TB>
                 </div>
+              )}
 
-                <button
-                  onClick={save}
-                  className={`flex items-center gap-1 px-2 py-1.5 sm:py-1 rounded text-xs transition-all ${
-                    saveFlash ? 'bg-brand-success/20 text-brand-success' :
-                    modified ? 'bg-brand-accent/20 text-brand-accent hover:bg-brand-accent/30' :
-                    'text-gray-600 hover:text-gray-400 hover:bg-white/5'
-                  }`}
-                  title="Save (Ctrl+S)"
-                >
-                  <SaveIcon /> <span className="hidden sm:inline">{modified ? 'Save' : 'Saved'}</span>
+              {/* Right-side controls */}
+              <div className="flex items-center gap-0.5 ml-auto">
+                {/* View mode */}
+                {canPreview && (
+                  <div className="flex gap-0.5 bg-white/5 rounded p-0.5">
+                    {[{ v: 'source', l: 'Src' }, { v: 'preview', l: 'View' }, { v: 'split', l: 'Split' }].map(({ v, l }) => (
+                      <button key={v}
+                        onClick={() => setViewMode(v)}
+                        className={`${v === 'split' ? 'hidden sm:inline' : ''} px-2 py-0.5 rounded text-xs transition-all
+                          ${viewMode === v ? 'bg-brand-accent/80 text-white' : 'text-gray-500 hover:text-gray-300'}`}
+                      >{l}</button>
+                    ))}
+                  </div>
+                )}
+                <button onClick={() => setShowFind(v => !v)} className={`nav-icon ${showFind ? 'text-brand-accent' : ''}`} title="Find (Ctrl+F)"><SearchIco /></button>
+                <button onClick={downloadFile} className="nav-icon" title="Download"><DownloadIco /></button>
+                <button onClick={() => setFullScreen(v => !v)} className="nav-icon hidden sm:flex" title="Full screen">
+                  {fullScreen ? <ExitFull /> : <FullIco />}
                 </button>
+                <button onClick={forceSave} className={`nav-icon ${statusColor}`} title="Save (Ctrl+S)"><SaveIco /></button>
               </div>
             </div>
 
+            {/* Find bar */}
+            {showFind && (
+              <div className="flex items-center gap-2 px-3 py-1.5 border-b border-white/5 bg-black/20 shrink-0">
+                <SearchIco />
+                <input
+                  autoFocus
+                  value={findQuery}
+                  onChange={e => setFindQuery(e.target.value)}
+                  placeholder="Find in file…"
+                  className="flex-1 bg-transparent text-white text-xs outline-none placeholder-gray-600"
+                />
+                {findQuery && (
+                  <span className="text-xs text-gray-500">{matchCount} match{matchCount !== 1 ? 'es' : ''}</span>
+                )}
+                <button onClick={() => { setShowFind(false); setFindQuery('') }} className="nav-icon"><CloseIco /></button>
+              </div>
+            )}
+
             {/* Editor area */}
-            <div className="flex-1 overflow-hidden flex">
+            <div className="flex-1 overflow-hidden flex min-h-0">
               {/* Source editor */}
               {(viewMode === 'source' || viewMode === 'split') && (
                 <div className={`flex flex-col overflow-hidden ${viewMode === 'split' ? 'w-1/2 border-r border-white/5' : 'w-full'}`}>
                   <textarea
                     ref={textareaRef}
-                    value={activeFile.content}
-                    onChange={e => {
-                      setActiveFile(f => ({ ...f, content: e.target.value }))
-                      setModified(true)
+                    value={content}
+                    onChange={e => setContent(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    onKeyUp={e => {
+                      const { selectionStart: ss, value } = e.target
+                      setCursorPos(getCursorPos(value, ss))
+                    }}
+                    onClick={e => {
+                      const { selectionStart: ss, value } = e.target
+                      setCursorPos(getCursorPos(value, ss))
                     }}
                     spellCheck={false}
                     className="source-editor flex-1 w-full resize-none"
                     style={{ maxHeight: 'none', height: '100%', minHeight: 'unset', borderRadius: 0, border: 'none' }}
-                    placeholder={isMarkdown(activeFile.name) ? '# Heading\n\nStart writing...' : 'Start typing...'}
+                    placeholder={isMd ? '# Heading\n\nStart writing…\n\nTip: use the toolbar to format, Ctrl+F to find, Ctrl+S to save.' : 'Start typing…'}
                   />
                 </div>
               )}
@@ -531,31 +672,29 @@ export default function Editor({ userId }) {
               {/* Preview */}
               {(viewMode === 'preview' || viewMode === 'split') && (
                 <div className={`overflow-auto p-5 ${viewMode === 'split' ? 'w-1/2' : 'w-full'}`}>
-                  {isMarkdown(activeFile.name) ? (
+                  {isMd ? (
                     <div
                       className="markdown-preview text-sm text-gray-300 max-w-none"
-                      dangerouslySetInnerHTML={{ __html: renderMd(activeFile.content) }}
+                      dangerouslySetInnerHTML={{ __html: renderMd(content) }}
                     />
                   ) : (
-                    <iframe
-                      srcDoc={activeFile.content}
-                      className="w-full h-full rounded border-0"
-                      sandbox="allow-scripts"
-                      title="preview"
-                    />
+                    <iframe srcDoc={content} className="w-full h-full rounded border-0" sandbox="allow-scripts" title="preview" />
                   )}
                 </div>
               )}
             </div>
 
             {/* Status bar */}
-            <div className="flex items-center gap-4 px-4 py-1 border-t border-white/5 shrink-0 text-xs text-gray-700">
-              <span>{activeFile.content.split('\n').length} lines</span>
-              <span>{activeFile.content.length} chars</span>
-              {isMarkdown(activeFile.name) && (
-                <span>{activeFile.content.split(/\s+/).filter(Boolean).length} words</span>
-              )}
-              <span className="ml-auto">{getExt(activeFile.name).toUpperCase() || 'TXT'}</span>
+            <div className="flex items-center gap-3 sm:gap-4 px-3 py-1 border-t border-white/5 shrink-0 text-xs select-none">
+              <span className={`font-medium ${statusColor}`}>{statusLabel}</span>
+              <span className="text-gray-600">Ln {cursorPos.line}, Col {cursorPos.col}</span>
+              <span className="text-gray-600">{content.split('\n').length} lines</span>
+              {isMd && <>
+                <span className="text-gray-600">{words} words</span>
+                <span className="text-gray-600">{getReadTime(content)} min read</span>
+              </>}
+              <span className="ml-auto text-gray-700">{(new Blob([content]).size / 1024).toFixed(1)} KB</span>
+              <span className="text-gray-700">{getExt(activeFile.name).toUpperCase() || 'TXT'}</span>
             </div>
           </div>
         )}
