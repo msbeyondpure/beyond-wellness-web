@@ -197,14 +197,16 @@ export default function Editor({ userId }) {
   const [openTabs, setOpenTabs]           = useState([])
   const [historyVer, setHistoryVer]       = useState(0) // triggers re-render for canUndo/canRedo
 
-  const textareaRef           = useRef(null)
-  const saveTimer             = useRef(null)
-  const checkpointTimer       = useRef(null)
-  const resizing              = useRef(false)
-  const savedContentRef       = useRef('')   // last content that was actually saved to DB
-  const undoRef               = useRef([])   // string[] — per-file undo stack
-  const redoRef               = useRef([])   // string[] — per-file redo stack
-  const lastCheckpointRef     = useRef('')   // content at last checkpoint push
+  const textareaRef        = useRef(null)
+  const saveTimer          = useRef(null)
+  const checkpointTimer    = useRef(null)
+  const resizing           = useRef(false)
+  const savedContentRef    = useRef('')  // last content written to DB
+  const undoRef            = useRef([]) // string[] — before-snapshots
+  const redoRef            = useRef([]) // string[] — after-snapshots
+  const baselineRef        = useRef('') // content at last undo boundary (the "before" for next session)
+  const sessionStartRef    = useRef(null) // content captured when typing session begins (null = no session)
+  const isUndoingRef       = useRef(false) // true during undo/redo so the effect doesn't start a new session
 
   const canUndo = undoRef.current.length > 0
   const canRedo = redoRef.current.length > 0
@@ -218,10 +220,10 @@ export default function Editor({ userId }) {
     bumpHistory()
   }
 
-  function pushCheckpoint(val, path = activeFile?.path) {
-    if (!path || val === lastCheckpointRef.current) return
-    lastCheckpointRef.current = val
-    const next = [...undoRef.current, val].slice(-MAX_HIST)
+  // Push `snapshot` as a before-state onto the undo stack
+  function pushToUndo(snapshot, path = activeFile?.path) {
+    if (!path) return
+    const next = [...undoRef.current, snapshot].slice(-MAX_HIST)
     undoRef.current = next
     redoRef.current = []
     saveStack(UNDO_KEY(path), next)
@@ -231,28 +233,36 @@ export default function Editor({ userId }) {
 
   function performUndo() {
     if (!activeFile || undoRef.current.length === 0) return
+    clearTimeout(checkpointTimer.current)
+    sessionStartRef.current = null
     const prev    = undoRef.current[undoRef.current.length - 1]
+    const curr    = content
     const newUndo = undoRef.current.slice(0, -1)
-    const newRedo = [...redoRef.current, content].slice(-MAX_HIST)
+    const newRedo = [...redoRef.current, curr].slice(-MAX_HIST)
     undoRef.current = newUndo
     redoRef.current = newRedo
     saveStack(UNDO_KEY(activeFile.path), newUndo)
     saveStack(REDO_KEY(activeFile.path), newRedo)
-    lastCheckpointRef.current = prev
+    baselineRef.current = prev
+    isUndoingRef.current = true
     setContent(prev)
     bumpHistory()
   }
 
   function performRedo() {
     if (!activeFile || redoRef.current.length === 0) return
+    clearTimeout(checkpointTimer.current)
+    sessionStartRef.current = null
     const next    = redoRef.current[redoRef.current.length - 1]
+    const curr    = content
     const newRedo = redoRef.current.slice(0, -1)
-    const newUndo = [...undoRef.current, content].slice(-MAX_HIST)
+    const newUndo = [...undoRef.current, curr].slice(-MAX_HIST)
     undoRef.current = newUndo
     redoRef.current = newRedo
     saveStack(UNDO_KEY(activeFile.path), newUndo)
     saveStack(REDO_KEY(activeFile.path), newRedo)
-    lastCheckpointRef.current = next
+    baselineRef.current = next
+    isUndoingRef.current = true
     setContent(next)
     bumpHistory()
   }
@@ -276,10 +286,13 @@ export default function Editor({ userId }) {
     const f = files.find(f => f.path === activeFile.path)
     if (!f) return
     const c = f.content || ''
+    clearTimeout(checkpointTimer.current)
+    sessionStartRef.current = null
+    isUndoingRef.current = true   // don't treat file-load as a typing session start
     setContent(c)
     setSaveStatus('saved')
     savedContentRef.current = c
-    lastCheckpointRef.current = c
+    baselineRef.current = c
     loadHistory(activeFile.path)
   }, [activeFile?.path]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -296,24 +309,46 @@ export default function Editor({ userId }) {
     setContent(curr => {
       if (curr === prevSaved) {
         // No local unsaved changes — accept remote version
-        lastCheckpointRef.current = dbContent
+        baselineRef.current = dbContent
+        isUndoingRef.current = true
         return dbContent
       }
-      // We have unsaved local changes — keep local, status becomes modified
       return curr
     })
-    setSaveStatus(curr => curr === 'saved' ? 'saved' : curr)
   }, [files]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── auto-save + checkpoint debounce ──────────────────────────────────────
   useEffect(() => {
     if (!activeFile) return
+
+    // If this change was triggered by undo/redo, skip checkpoint logic
+    if (isUndoingRef.current) {
+      isUndoingRef.current = false
+      // Still handle save status
+      if (content === savedContentRef.current) setSaveStatus('saved')
+      else setSaveStatus('modified')
+      return
+    }
+
     if (content === savedContentRef.current) { setSaveStatus('saved'); return }
     setSaveStatus('modified')
 
-    // Checkpoint after 1 s of no typing
+    // On the FIRST keystroke of a new typing session, capture the before-state
+    if (sessionStartRef.current === null) {
+      sessionStartRef.current = baselineRef.current
+    }
+
+    // After 1 s of no typing, push the session-start content as the undo checkpoint
     clearTimeout(checkpointTimer.current)
-    checkpointTimer.current = setTimeout(() => pushCheckpoint(content), 1000)
+    checkpointTimer.current = setTimeout(() => {
+      const before = sessionStartRef.current
+      sessionStartRef.current = null
+      // Only push if the before-state differs from what we'd restore to
+      if (before !== null && before !== content) {
+        pushToUndo(before)
+        baselineRef.current = content // new baseline is current content
+      }
+    }, 1000)
 
     // Auto-save after 1.2 s
     clearTimeout(saveTimer.current)
@@ -361,8 +396,13 @@ export default function Editor({ userId }) {
     if (!activeFile) return
     clearTimeout(saveTimer.current)
     clearTimeout(checkpointTimer.current)
+    // Flush any pending typing session as an undo checkpoint
+    if (sessionStartRef.current !== null && sessionStartRef.current !== content) {
+      pushToUndo(sessionStartRef.current)
+      baselineRef.current = content
+    }
+    sessionStartRef.current = null
     setSaveStatus('saving')
-    pushCheckpoint(content)
     await saveContent(activeFile.path, content)
     savedContentRef.current = content
     setSaveStatus('saved')
@@ -429,7 +469,14 @@ export default function Editor({ userId }) {
 
   // ── markdown formatting ───────────────────────────────────────────────────
   function applyFormat(fmt) {
-    pushCheckpoint(content) // snapshot before change
+    // Immediately commit current content as an undo point (before modifying)
+    if (activeFile) {
+      clearTimeout(checkpointTimer.current)
+      const before = sessionStartRef.current !== null ? sessionStartRef.current : content
+      pushToUndo(before)
+      sessionStartRef.current = null
+      baselineRef.current = content // will be updated to newVal after setContent below
+    }
     const ta = textareaRef.current
     if (!ta) return
     const { selectionStart: ss, selectionEnd: se, value } = ta
@@ -458,6 +505,8 @@ export default function Editor({ userId }) {
 
     const newVal = before + insert + after
     setContent(newVal)
+    baselineRef.current = newVal // post-format is new baseline
+    isUndoingRef.current = true  // don't treat this programmatic change as a typing session
     setTimeout(() => { ta.focus(); ta.setSelectionRange(cursorAt, cursorAt) }, 0)
   }
 
