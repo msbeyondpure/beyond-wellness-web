@@ -56,10 +56,15 @@ export default function Tasks({ userId, onStatsChange }) {
   const [dragOverTaskId, setDragOverTaskId] = useState(null)
   const [dragSectionCat, setDragSectionCat] = useState(null)
   const [dragOverSectionCat, setDragOverSectionCat] = useState(null)
-  const [notepadCollapsed, setNotepadCollapsed] = useState(false)
+  // Default notepad to collapsed on mobile, expanded on desktop
+  const [notepadCollapsed, setNotepadCollapsed] = useState(() => {
+    if (typeof window !== 'undefined') return window.innerWidth < 640
+    return false
+  })
   const [notepadHeight, setNotepadHeight] = useState(() => {
     const s = localStorage.getItem('bwNotepadHeight'); return s ? parseInt(s) : 420
   })
+  const [showMobileNotepad, setShowMobileNotepad] = useState(false)
   const notepadRef = useRef(null)
 
   // Derive ordered categories
@@ -220,12 +225,12 @@ export default function Tasks({ userId, onStatsChange }) {
   const completedTasks = tasks.filter(t => t.completed)
 
   return (
-    <div className="p-4 pt-6 animate-fadeIn">
-      <div className="flex gap-4 max-w-5xl mx-auto">
+    <div className="p-3 pt-4 sm:p-4 sm:pt-6 animate-fadeIn">
+      <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 max-w-5xl mx-auto">
 
-        {/* ── Notepad (LEFT) ── */}
+        {/* ── Notepad (LEFT on desktop, hidden on mobile — accessed via button) ── */}
         <div
-          className={`notepad-section glass-card rounded transition-all flex-shrink-0 ${notepadCollapsed ? 'w-10' : 'w-96'}`}
+          className={`notepad-section glass-card rounded transition-all flex-shrink-0 hidden sm:block ${notepadCollapsed ? 'w-10' : 'w-96'}`}
           style={{ alignSelf: 'flex-start' }}
         >
           {notepadCollapsed ? (
@@ -272,21 +277,30 @@ export default function Tasks({ userId, onStatsChange }) {
           )}
         </div>
 
-        {/* ── Tasks (RIGHT) ── */}
-        <div className="tasks-section glass-card rounded p-5 flex-1 min-w-0">
-          <div className="flex items-center justify-between mb-5">
-            <h2 className="text-lg font-semibold text-brand-accent">Tasks</h2>
-            <div className="flex gap-2">
+        {/* ── Tasks (RIGHT on desktop, full-width on mobile) ── */}
+        <div className="tasks-section glass-card rounded p-3 sm:p-5 flex-1 min-w-0">
+          <div className="flex items-center justify-between mb-4 sm:mb-5 gap-2">
+            <h2 className="text-base sm:text-lg font-semibold text-brand-accent">Tasks</h2>
+            <div className="flex gap-1.5 sm:gap-2 flex-wrap justify-end">
+              {/* Mobile-only Notes button */}
+              <button
+                onClick={() => setShowMobileNotepad(true)}
+                className="sm:hidden px-2.5 py-2 bg-white/10 text-gray-300 rounded text-xs font-medium flex items-center gap-1 active:bg-white/20"
+                title="Open notepad"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                Notes
+              </button>
               <button
                 onClick={() => setShowCompleted(v => !v)}
-                className="px-3 py-1.5 bg-white/10 text-gray-300 rounded text-sm font-medium flex items-center gap-1 hover:bg-white/20 transition-all"
+                className="px-2.5 sm:px-3 py-2 sm:py-1.5 bg-white/10 text-gray-300 rounded text-xs sm:text-sm font-medium flex items-center gap-1 hover:bg-white/20 active:bg-white/20 transition-all"
               >
-                <CheckCircle /> {showCompleted ? 'Hide Completed' : 'Completed'}
-                {completedTasks.length > 0 && <span className="ml-1 text-xs text-gray-500">({completedTasks.length})</span>}
+                <CheckCircle /> <span className="hidden sm:inline">{showCompleted ? 'Hide Completed' : 'Completed'}</span><span className="sm:hidden">Done</span>
+                {completedTasks.length > 0 && <span className="ml-0.5 sm:ml-1 text-xs text-gray-500">({completedTasks.length})</span>}
               </button>
               <button
                 onClick={() => setShowNewCategoryForm(true)}
-                className="btn-primary px-3 py-1.5 rounded text-white text-sm font-medium flex items-center gap-1"
+                className="btn-primary px-2.5 sm:px-3 py-2 sm:py-1.5 rounded text-white text-xs sm:text-sm font-medium flex items-center gap-1"
               >
                 <Plus /> Section
               </button>
@@ -345,12 +359,12 @@ export default function Tasks({ userId, onStatsChange }) {
               >
                 {/* Section header */}
                 <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 min-w-0 flex-1">
                     <div
                       draggable
                       onDragStart={e => handleSectionDragStart(e, cat)}
                       onDragEnd={() => { setDragSectionCat(null); setDragOverSectionCat(null) }}
-                      className="cursor-grab text-gray-600 hover:text-gray-400"
+                      className="cursor-grab text-gray-600 hover:text-gray-400 hidden sm:block"
                       title="Drag to reorder"
                     >
                       <GripV />
@@ -383,9 +397,9 @@ export default function Tasks({ userId, onStatsChange }) {
                     )}
                     <span className="text-xs text-gray-500 bg-white/5 px-1.5 py-0.5 rounded">{done}/{total}</span>
                   </div>
-                  <div className="flex gap-1">
-                    <button onClick={() => setShowNewTaskForm(cat)} className="p-1 text-brand-accent hover:bg-white/10 rounded transition-all"><Plus /></button>
-                    <button onClick={() => deleteCategory(cat)} className="p-1 text-red-400 hover:bg-white/10 rounded transition-all"><Trash2 size={13} /></button>
+                  <div className="flex gap-1 flex-shrink-0">
+                    <button onClick={() => setShowNewTaskForm(cat)} className="p-2 sm:p-1 text-brand-accent hover:bg-white/10 active:bg-white/10 rounded transition-all"><Plus /></button>
+                    <button onClick={() => deleteCategory(cat)} className="p-2 sm:p-1 text-red-400 hover:bg-white/10 active:bg-white/10 rounded transition-all"><Trash2 size={14} /></button>
                   </div>
                 </div>
 
@@ -426,9 +440,9 @@ export default function Tasks({ userId, onStatsChange }) {
                         onDragEnd={() => { setDragTaskId(null); setDragOverTaskId(null) }}
                         onClick={() => setExpandedTask(expandedTask === task.id ? null : task.id)}
                       >
-                        <div className="flex items-center gap-1 p-3 cursor-pointer">
+                        <div className="flex items-center gap-1 sm:gap-1 p-2.5 sm:p-3 cursor-pointer">
                           <span
-                            className="task-drag-handle flex-shrink-0 text-gray-500 hover:text-brand-accent mr-1"
+                            className="task-drag-handle flex-shrink-0 text-gray-500 hover:text-brand-accent mr-1 hidden sm:flex"
                             draggable
                             onDragStart={e => handleTaskDragStart(e, task.id)}
                             onClick={e => e.stopPropagation()}
@@ -438,25 +452,25 @@ export default function Tasks({ userId, onStatsChange }) {
                           </span>
                           <button
                             onClick={e => toggleTask(task.id, e)}
-                            className={`relative flex-shrink-0 w-5 h-5 rounded border-2 flex items-center justify-center transition-all ${task.completed ? 'bg-brand-success border-brand-success' : 'border-gray-600 hover:border-brand-accent'} ${checkAnimating === task.id ? 'check-animate' : ''}`}
+                            className={`relative flex-shrink-0 w-6 h-6 sm:w-5 sm:h-5 rounded border-2 flex items-center justify-center transition-all ${task.completed ? 'bg-brand-success border-brand-success' : 'border-gray-600 hover:border-brand-accent'} ${checkAnimating === task.id ? 'check-animate' : ''}`}
                           >
                             {task.completed && <Check />}
                           </button>
-                          <span className={`flex-1 text-sm ${task.completed ? 'line-through text-gray-500' : 'text-gray-200'}`}>
+                          <span className={`flex-1 text-sm sm:text-sm ml-1 ${task.completed ? 'line-through text-gray-500' : 'text-gray-200'}`}>
                             {task.text}
                           </span>
                           <button
                             onClick={e => sendToCompleted(task.id, e)}
-                            className="p-1.5 text-brand-success hover:bg-white/10 rounded transition-all"
+                            className="p-2 sm:p-1.5 text-brand-success hover:bg-white/10 active:bg-white/10 rounded transition-all"
                             title="Send to Completed"
                           >
                             <CheckCircle />
                           </button>
                           <button
                             onClick={e => { e.stopPropagation(); handleDeleteTask(task.id, cat) }}
-                            className="p-1 text-red-400 hover:bg-white/10 rounded transition-all"
+                            className="p-2 sm:p-1 text-red-400 hover:bg-white/10 active:bg-white/10 rounded transition-all"
                           >
-                            <Trash2 size={13} />
+                            <Trash2 size={14} />
                           </button>
                         </div>
 
@@ -484,6 +498,40 @@ export default function Tasks({ userId, onStatsChange }) {
           })}
         </div>
       </div>
+
+      {/* === Mobile Notepad bottom sheet === */}
+      {showMobileNotepad && (
+        <div className="fixed inset-0 z-50 sm:hidden flex flex-col">
+          <div
+            className="flex-1 bg-black/60 animate-fadeIn"
+            onClick={() => setShowMobileNotepad(false)}
+          />
+          <div
+            className="glass-card border-t border-brand-accent/30 rounded-t-2xl pb-safe flex flex-col"
+            style={{ height: '75vh', animation: 'drawerSlideIn 0.22s ease', transform: 'none' }}
+          >
+            <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
+              <h3 className="text-sm font-semibold text-brand-accent flex items-center gap-2">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                Notepad
+              </h3>
+              <button onClick={() => setShowMobileNotepad(false)} className="nav-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
+            </div>
+            <textarea
+              value={notepadContent}
+              onChange={e => updateContent(e.target.value)}
+              placeholder={"Quick notes...\n\nJot anything down here."}
+              className="flex-1 w-full p-4 bg-transparent text-gray-300 text-base resize-none focus:outline-none placeholder-gray-600"
+              autoFocus
+            />
+            <div className="px-4 py-2 text-xs text-gray-600 border-t border-white/5">
+              {wordCount} word{wordCount !== 1 ? 's' : ''}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -248,3 +248,147 @@ body { margin: 0; background: #1a1a1a; color: #e5e5e5; min-height: 100vh; }
 ::-webkit-scrollbar-track { background: #111; }
 ::-webkit-scrollbar-thumb { background: #3a3a3a; border-radius: 2px; }
 ::-webkit-scrollbar-thumb:hover { background: #555; }
+
+/* === Mobile-specific overrides === */
+@media (max-width: 640px) {
+  /* Prevent iOS auto-zoom on focus by ensuring inputs are >= 16px */
+  input, select, textarea, button {
+    font-size: 16px !important;
+  }
+  input.inline-edit-input { font-size: 14px !important; }
+
+  /* Bigger nav icons on mobile (44px touch target) */
+  .nav-icon { padding: 10px; }
+  .nav-icon svg { width: 20px; height: 20px; }
+
+  /* Hide custom tiny scrollbars; let mobile use native momentum scroll */
+  ::-webkit-scrollbar { width: 0; height: 0; display: none; }
+
+  /* Smooth momentum scroll */
+  .mobile-scroll, .overflow-y-auto, .overflow-x-auto, .overflow-auto {
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Disable hover-only transforms (they get stuck on touch) */
+  .btn-primary:hover, .btn-success:hover, .btn-danger:hover {
+    transform: none;
+  }
+
+  /* Bigger context menu items on mobile */
+  .context-menu-item { padding: 12px 16px; font-size: 14px; }
+  .context-menu { min-width: 200px; }
+
+  /* Prevent text selection on tap-and-hold on UI chrome */
+  .nav-icon, .btn-primary, .btn-success, .btn-danger, button[role="tab"] {
+    -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
+  }
+}
+
+/* === Bottom mobile nav bar === */
+.mobile-bottom-nav {
+  position: fixed;
+  bottom: 0; left: 0; right: 0;
+  height: 60px;
+  padding-bottom: env(safe-area-inset-bottom, 0);
+  background: linear-gradient(180deg, rgba(26,26,26,0.92) 0%, rgba(17,17,17,0.98) 100%);
+  border-top: 1px solid rgba(196,94,44,0.15);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  display: flex;
+  z-index: 50;
+  box-shadow: 0 -4px 16px rgba(0,0,0,0.5);
+}
+.mobile-bottom-nav button {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  color: #6b7280;
+  font-size: 10px;
+  font-weight: 500;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: color 0.15s;
+  padding: 6px 4px;
+  min-height: 44px;
+  -webkit-tap-highlight-color: transparent;
+}
+.mobile-bottom-nav button.active {
+  color: #c45e2c;
+}
+.mobile-bottom-nav button.active svg {
+  filter: drop-shadow(0 0 6px rgba(196,94,44,0.4));
+}
+.mobile-bottom-nav button:not(.active):active {
+  color: #d4713f;
+  background: rgba(255,255,255,0.04);
+}
+
+/* === Slide-out drawer === */
+.drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  backdrop-filter: blur(2px);
+  z-index: 45;
+  animation: fadeIn 0.2s ease;
+}
+.drawer-panel {
+  position: fixed;
+  top: 0; bottom: 60px;
+  left: 0;
+  width: 80vw;
+  max-width: 320px;
+  background: linear-gradient(135deg, #2a2a2a 0%, #1a1a1a 100%);
+  border-right: 1px solid rgba(196,94,44,0.2);
+  z-index: 46;
+  box-shadow: 4px 0 24px rgba(0,0,0,0.6);
+  animation: drawerSlideIn 0.22s ease;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+@keyframes drawerSlideIn {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
+}
+
+/* Mobile card row used in lieu of table rows */
+.mobile-card {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 8px;
+  transition: background 0.15s;
+}
+.mobile-card:active { background: rgba(255,255,255,0.07); }
+
+/* Mobile FAB */
+.mobile-fab {
+  position: fixed;
+  bottom: calc(76px + env(safe-area-inset-bottom, 0));
+  right: 16px;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #c45e2c 0%, #a34820 100%);
+  box-shadow: 0 4px 16px rgba(196,94,44,0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  z-index: 40;
+  transition: transform 0.15s;
+}
+.mobile-fab:active { transform: scale(0.92); }
+
+/* Safe area helpers */
+.pb-safe { padding-bottom: env(safe-area-inset-bottom, 0); }
+.pt-safe { padding-top: env(safe-area-inset-top, 0); }

@@ -41,8 +41,11 @@ export default function Formulas({ userId }) {
   const [importError, setImportError] = useState('')
 
   const [localFormulas, setLocalFormulas] = useState([])
+  const [showMobileSidebar, setShowMobileSidebar] = useState(false)
   useEffect(() => { setLocalFormulas(formulas) }, [formulas])
   useEffect(() => { setEditingName(false) }, [activeId])
+  // Auto-close mobile drawer when a formula is selected
+  useEffect(() => { if (activeId) setShowMobileSidebar(false) }, [activeId])
 
   const active = localFormulas.find(f => f.id === activeId)
 
@@ -177,13 +180,13 @@ export default function Formulas({ userId }) {
   )
 
   if (loading) return (
-    <div className="p-4 pt-6 animate-fadeIn flex items-center justify-center" style={{ height: 'calc(100vh - 40px)' }}>
+    <div className="p-4 pt-6 animate-fadeIn flex items-center justify-center h-[calc(100vh-160px)] sm:h-[calc(100vh-40px)]">
       <span className="text-gray-600 text-sm">Loading formulas...</span>
     </div>
   )
 
   return (
-    <div className="p-4 pt-6 animate-fadeIn" style={{ height: 'calc(100vh - 40px)' }}>
+    <div className="p-3 pt-4 sm:p-4 sm:pt-6 animate-fadeIn h-[calc(100vh-136px)] sm:h-[calc(100vh-40px)]">
       <Toast msg={toast} />
 
       {/* Import modal */}
@@ -215,9 +218,17 @@ export default function Formulas({ userId }) {
 
       <div className="flex gap-4 h-full">
 
+        {/* ── Mobile drawer backdrop ── */}
+        {showMobileSidebar && (
+          <div
+            className="drawer-backdrop sm:hidden"
+            onClick={() => setShowMobileSidebar(false)}
+          />
+        )}
+
         {/* ── Formula List Sidebar ── */}
-        <div className="w-64 flex-shrink-0">
-          <div className="glass-card rounded p-4 h-full flex flex-col">
+        <div className={`${showMobileSidebar ? 'drawer-panel' : 'hidden'} sm:block sm:relative sm:w-64 sm:flex-shrink-0 sm:h-full`}>
+          <div className="glass-card sm:rounded p-4 h-full flex flex-col">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-white font-semibold">Formulas</h2>
               <button
@@ -276,15 +287,29 @@ export default function Formulas({ userId }) {
         {/* ── Formula Editor ── */}
         <div className="flex-1 min-w-0">
           {!active ? (
-            <div className="glass-card rounded p-5 h-full flex items-center justify-center">
-              <p className="text-gray-600 text-sm">
-                {localFormulas.length === 0 ? 'Create your first formula →' : 'Select a formula'}
+            <div className="glass-card rounded p-5 h-full flex flex-col items-center justify-center">
+              <p className="text-gray-600 text-sm mb-4">
+                {localFormulas.length === 0 ? 'Create your first formula' : 'Select a formula'}
               </p>
+              <button
+                onClick={() => setShowMobileSidebar(true)}
+                className="sm:hidden btn-primary px-4 py-2.5 rounded text-white text-sm flex items-center gap-2"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+                Browse Formulas
+              </button>
             </div>
           ) : (
-            <div className="glass-card rounded p-5 h-full flex flex-col overflow-hidden">
+            <div className="glass-card rounded p-3 sm:p-5 h-full flex flex-col overflow-hidden">
               {/* Header */}
-              <div className="flex items-center justify-between mb-4 pb-4 border-b border-white/10 shrink-0">
+              <div className="flex items-center justify-between mb-3 sm:mb-4 pb-3 sm:pb-4 border-b border-white/10 shrink-0 gap-2">
+                <button
+                  onClick={() => setShowMobileSidebar(true)}
+                  className="sm:hidden nav-icon flex-shrink-0"
+                  title="Show formulas"
+                >
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+                </button>
                 {editingName ? (
                   <input
                     autoFocus
@@ -297,18 +322,18 @@ export default function Formulas({ userId }) {
                 ) : (
                   <h2
                     onClick={() => { setNameDraft(active.name); setEditingName(true) }}
-                    className="text-xl font-semibold text-white cursor-pointer hover:text-brand-accent transition-colors group flex items-center gap-2 select-none"
+                    className="text-base sm:text-xl font-semibold text-white cursor-pointer hover:text-brand-accent transition-colors group flex items-center gap-2 select-none truncate min-w-0 flex-1"
                     title="Click to rename"
                   >
-                    {active.name}
-                    <span className="opacity-0 group-hover:opacity-40 transition-opacity shrink-0"><EditIcon /></span>
+                    <span className="truncate">{active.name}</span>
+                    <span className="opacity-0 group-hover:opacity-40 transition-opacity shrink-0 hidden sm:inline"><EditIcon /></span>
                   </h2>
                 )}
 
-                <div className="flex gap-2 shrink-0">
-                  <button onClick={() => setShowImport(true)} className="text-xs text-gray-500 hover:text-gray-300 px-2 py-1 rounded hover:bg-white/5 transition-all">Import</button>
-                  <button onClick={() => exportFormula('txt')} className="text-xs text-gray-500 hover:text-gray-300 px-2 py-1 rounded hover:bg-white/5 transition-all">TXT</button>
-                  <button onClick={() => exportFormula('md')} className="text-xs text-gray-500 hover:text-gray-300 px-2 py-1 rounded hover:bg-white/5 transition-all">MD</button>
+                <div className="flex gap-1 sm:gap-2 shrink-0">
+                  <button onClick={() => setShowImport(true)} className="text-xs text-gray-500 hover:text-gray-300 px-2 py-1.5 sm:py-1 rounded hover:bg-white/5 active:bg-white/5 transition-all">Import</button>
+                  <button onClick={() => exportFormula('txt')} className="hidden sm:inline text-xs text-gray-500 hover:text-gray-300 px-2 py-1 rounded hover:bg-white/5 transition-all">TXT</button>
+                  <button onClick={() => exportFormula('md')} className="text-xs text-gray-500 hover:text-gray-300 px-2 py-1.5 sm:py-1 rounded hover:bg-white/5 active:bg-white/5 transition-all">MD</button>
                   <button
                     onClick={() => {
                       const total = getTotalCost(active)
@@ -318,7 +343,7 @@ export default function Formulas({ userId }) {
                       navigator.clipboard.writeText(text)
                       showToast('Copied for Claude')
                     }}
-                    className="text-xs text-gray-500 hover:text-brand-accent px-2 py-1 rounded hover:bg-white/5 transition-all"
+                    className="hidden sm:inline text-xs text-gray-500 hover:text-brand-accent px-2 py-1 rounded hover:bg-white/5 transition-all"
                   >
                     Copy for Claude
                   </button>
@@ -328,10 +353,10 @@ export default function Formulas({ userId }) {
               {/* Ingredient table */}
               <div className="flex-1 overflow-y-auto">
                 <div className="pr-1">
-                  {/* Column headers */}
+                  {/* Column headers (desktop only) */}
                   <div
                     style={{ display: 'grid', gridTemplateColumns: gridTemplate, columnGap: 8, marginBottom: 4, paddingRight: 4 }}
-                    className="border-b border-white/5 pb-2"
+                    className="border-b border-white/5 pb-2 hidden sm:grid"
                   >
                     <div />
                     <div className="text-xs text-gray-600 font-medium uppercase tracking-wider">Ingredient</div>
@@ -356,97 +381,128 @@ export default function Formulas({ userId }) {
                     const isSource = ratioPreview.sourceId === ing.id
                     const showingPreview = previewVal !== null
 
-                    return (
-                      <div
-                        key={ing.id}
-                        className="group"
-                        style={{ display: 'grid', gridTemplateColumns: gridTemplate, columnGap: 8, alignItems: 'center', paddingRight: 4, paddingTop: 3, paddingBottom: 3 }}
-                      >
-                        {/* Ratio-include checkbox */}
-                        <div className="flex items-center">
-                          <button
-                            title={ing.includeInRatio ? 'Included in ratio' : 'Excluded from ratio'}
-                            onClick={() => {
-                              const updated = updateIngredient(active.id, ing.id, { includeInRatio: !ing.includeInRatio })
+                    const nameInput = (
+                      <input
+                        value={ing.name}
+                        onChange={e => updateIngredient(active.id, ing.id, { name: e.target.value })}
+                        onBlur={() => saveIngredient(active.id)}
+                        placeholder="Ingredient name"
+                        style={{ minWidth: 0, background: 'transparent', border: 'none', outline: 'none', color: '#e5e5e5', fontSize: 13 }}
+                        className="placeholder-gray-700"
+                      />
+                    )
+                    const amountInput = (
+                      <input
+                        value={ing.amount}
+                        onChange={e => updateIngredient(active.id, ing.id, { amount: e.target.value })}
+                        onBlur={() => saveIngredient(active.id)}
+                        placeholder="e.g. 100g"
+                        style={{ minWidth: 0, width: '100%', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 3, padding: '6px 8px', color: '#e5e5e5', fontSize: 13, outline: 'none' }}
+                      />
+                    )
+                    const ratioInput = (
+                      <div style={{ position: 'relative', minWidth: 0, width: '100%' }}>
+                        <input
+                          value={isSource ? ratioPreview.sourceValue : (showingPreview ? previewVal : (ing.ratio || ''))}
+                          readOnly={showingPreview && !isSource}
+                          onChange={e => {
+                            if (isSource || ratioPreview.sourceId === null) {
+                              setRatioPreview({ sourceId: ing.id, sourceValue: e.target.value })
+                            }
+                          }}
+                          onFocus={() => {
+                            if (!isSource) setRatioPreview({ sourceId: ing.id, sourceValue: ing.ratio || '' })
+                          }}
+                          onBlur={() => {
+                            if (isSource) {
+                              const updated = updateIngredient(active.id, ing.id, { ratio: ratioPreview.sourceValue })
                               if (updated) handleSave(updated)
-                            }}
-                            style={{ width: 14, height: 14, borderRadius: 3, border: '1px solid', flexShrink: 0, borderColor: ing.includeInRatio ? '#c45e2c' : 'rgba(255,255,255,0.15)', background: ing.includeInRatio ? 'rgba(196,94,44,0.2)' : 'transparent' }}
-                          />
-                        </div>
-
-                        {/* Name */}
-                        <input
-                          value={ing.name}
-                          onChange={e => updateIngredient(active.id, ing.id, { name: e.target.value })}
-                          onBlur={() => saveIngredient(active.id)}
-                          placeholder="Ingredient name"
-                          style={{ minWidth: 0, background: 'transparent', border: 'none', outline: 'none', color: '#e5e5e5', fontSize: 13 }}
-                          className="placeholder-gray-700"
+                            }
+                            setRatioPreview({ sourceId: null, sourceValue: '' })
+                          }}
+                          placeholder="ratio"
+                          style={{
+                            minWidth: 0, width: '100%',
+                            background: isSource ? 'rgba(196,94,44,0.1)' : showingPreview ? 'rgba(139,154,62,0.08)' : 'rgba(255,255,255,0.03)',
+                            border: isSource ? '1px solid rgba(196,94,44,0.4)' : '1px solid rgba(255,255,255,0.06)',
+                            borderRadius: 3, padding: '6px 8px',
+                            color: showingPreview && !isSource ? '#8b9a3e' : '#e5e5e5',
+                            fontSize: 13, outline: 'none',
+                            cursor: showingPreview && !isSource ? 'default' : 'text'
+                          }}
                         />
+                        {!ing.includeInRatio && (
+                          <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.3)', borderRadius: 3, pointerEvents: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <span style={{ fontSize: 10, color: '#555' }}>excl.</span>
+                          </div>
+                        )}
+                      </div>
+                    )
+                    const costInput = (
+                      <input
+                        value={ing.cost}
+                        onChange={e => updateIngredient(active.id, ing.id, { cost: e.target.value })}
+                        onBlur={() => saveIngredient(active.id)}
+                        placeholder="0.00"
+                        style={{ minWidth: 0, width: '100%', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 3, padding: '6px 8px', color: '#e5e5e5', fontSize: 13, outline: 'none' }}
+                      />
+                    )
+                    const ratioToggle = (
+                      <button
+                        title={ing.includeInRatio ? 'Included in ratio' : 'Excluded from ratio'}
+                        onClick={() => {
+                          const updated = updateIngredient(active.id, ing.id, { includeInRatio: !ing.includeInRatio })
+                          if (updated) handleSave(updated)
+                        }}
+                        style={{ width: 14, height: 14, borderRadius: 3, border: '1px solid', flexShrink: 0, borderColor: ing.includeInRatio ? '#c45e2c' : 'rgba(255,255,255,0.15)', background: ing.includeInRatio ? 'rgba(196,94,44,0.2)' : 'transparent' }}
+                      />
+                    )
+                    const removeBtn = (
+                      <button
+                        onClick={() => removeIngredient(active.id, ing.id)}
+                        className="text-gray-700 hover:text-red-400 active:text-red-400 transition-all flex items-center justify-center sm:opacity-0 sm:group-hover:opacity-100"
+                      >
+                        <Trash />
+                      </button>
+                    )
 
-                        {/* Amount */}
-                        <input
-                          value={ing.amount}
-                          onChange={e => updateIngredient(active.id, ing.id, { amount: e.target.value })}
-                          onBlur={() => saveIngredient(active.id)}
-                          placeholder="e.g. 100g"
-                          style={{ minWidth: 0, width: '100%', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 3, padding: '3px 6px', color: '#e5e5e5', fontSize: 13, outline: 'none' }}
-                        />
-
-                        {/* Ratio */}
-                        <div style={{ position: 'relative', minWidth: 0 }}>
-                          <input
-                            value={isSource ? ratioPreview.sourceValue : (showingPreview ? previewVal : (ing.ratio || ''))}
-                            readOnly={showingPreview && !isSource}
-                            onChange={e => {
-                              if (isSource || ratioPreview.sourceId === null) {
-                                setRatioPreview({ sourceId: ing.id, sourceValue: e.target.value })
-                              }
-                            }}
-                            onFocus={() => {
-                              if (!isSource) setRatioPreview({ sourceId: ing.id, sourceValue: ing.ratio || '' })
-                            }}
-                            onBlur={() => {
-                              if (isSource) {
-                                const updated = updateIngredient(active.id, ing.id, { ratio: ratioPreview.sourceValue })
-                                if (updated) handleSave(updated)
-                              }
-                              setRatioPreview({ sourceId: null, sourceValue: '' })
-                            }}
-                            placeholder="ratio"
-                            style={{
-                              minWidth: 0, width: '100%',
-                              background: isSource ? 'rgba(196,94,44,0.1)' : showingPreview ? 'rgba(139,154,62,0.08)' : 'rgba(255,255,255,0.03)',
-                              border: isSource ? '1px solid rgba(196,94,44,0.4)' : '1px solid rgba(255,255,255,0.06)',
-                              borderRadius: 3, padding: '3px 6px',
-                              color: showingPreview && !isSource ? '#8b9a3e' : '#e5e5e5',
-                              fontSize: 13, outline: 'none',
-                              cursor: showingPreview && !isSource ? 'default' : 'text'
-                            }}
-                          />
-                          {!ing.includeInRatio && (
-                            <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.3)', borderRadius: 3, pointerEvents: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                              <span style={{ fontSize: 10, color: '#555' }}>excl.</span>
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Cost */}
-                        <input
-                          value={ing.cost}
-                          onChange={e => updateIngredient(active.id, ing.id, { cost: e.target.value })}
-                          onBlur={() => saveIngredient(active.id)}
-                          placeholder="0.00"
-                          style={{ minWidth: 0, width: '100%', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 3, padding: '3px 6px', color: '#e5e5e5', fontSize: 13, outline: 'none' }}
-                        />
-
-                        {/* Remove */}
-                        <button
-                          onClick={() => removeIngredient(active.id, ing.id)}
-                          className="opacity-0 group-hover:opacity-100 text-gray-700 hover:text-red-400 transition-all flex items-center justify-center"
+                    return (
+                      <div key={ing.id} className="group">
+                        {/* Desktop row (grid) */}
+                        <div
+                          className="hidden sm:grid"
+                          style={{ gridTemplateColumns: gridTemplate, columnGap: 8, alignItems: 'center', paddingRight: 4, paddingTop: 3, paddingBottom: 3 }}
                         >
-                          <Trash />
-                        </button>
+                          <div className="flex items-center">{ratioToggle}</div>
+                          {nameInput}
+                          {amountInput}
+                          {ratioInput}
+                          {costInput}
+                          {removeBtn}
+                        </div>
+
+                        {/* Mobile row (stacked card) */}
+                        <div className="sm:hidden bg-white/[0.03] border border-white/5 rounded p-2.5 mb-2">
+                          <div className="flex items-center gap-2 mb-2">
+                            {ratioToggle}
+                            <div className="flex-1 min-w-0">{nameInput}</div>
+                            {removeBtn}
+                          </div>
+                          <div className="grid grid-cols-3 gap-2">
+                            <div>
+                              <div className="text-[10px] text-gray-600 mb-0.5 uppercase tracking-wider">Amount</div>
+                              {amountInput}
+                            </div>
+                            <div>
+                              <div className="text-[10px] text-gray-600 mb-0.5 uppercase tracking-wider">Ratio</div>
+                              {ratioInput}
+                            </div>
+                            <div>
+                              <div className="text-[10px] text-gray-600 mb-0.5 uppercase tracking-wider">Cost $</div>
+                              {costInput}
+                            </div>
+                          </div>
+                        </div>
                       </div>
                     )
                   })}
@@ -454,7 +510,7 @@ export default function Formulas({ userId }) {
                   {/* Add ingredient */}
                   <button
                     onClick={() => addIngredient(active.id)}
-                    className="mt-3 flex items-center gap-1.5 text-xs text-gray-600 hover:text-brand-accent transition-colors py-1.5"
+                    className="mt-3 flex items-center gap-1.5 text-xs sm:text-xs text-gray-500 hover:text-brand-accent active:text-brand-accent transition-colors py-3 sm:py-1.5 px-3 sm:px-0 w-full sm:w-auto justify-center sm:justify-start bg-white/5 sm:bg-transparent border border-dashed border-white/10 sm:border-none rounded"
                   >
                     <Plus /> Add ingredient
                   </button>

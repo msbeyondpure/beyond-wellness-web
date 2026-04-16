@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useAffiliates } from '../hooks/useAffiliates'
 import { useOutreach } from '../hooks/useOutreach'
 
@@ -44,15 +44,28 @@ function sortData(data, { field, direction }) {
 }
 
 function Modal({ isOpen, onClose, title, children }) {
+  // Lock body scroll
+  useEffect(() => {
+    if (!isOpen) return
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = '' }
+  }, [isOpen])
   if (!isOpen) return null
   return (
-    <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="glass-card rounded-lg w-full max-w-lg animate-scaleIn" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
+    <div className="fixed inset-0 bg-black/70 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={onClose}>
+      <div
+        className="glass-card rounded-t-2xl sm:rounded-lg w-full max-w-lg max-h-[90vh] sm:max-h-[85vh] flex flex-col animate-scaleIn pb-safe"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-4 py-3 border-b border-white/10 sticky top-0 glass-card rounded-t-2xl sm:rounded-t-lg z-10">
           <h3 className="text-sm font-semibold text-white">{title}</h3>
-          <button onClick={onClose} className="text-gray-500 hover:text-white text-lg leading-none transition-colors">×</button>
+          <button onClick={onClose} className="nav-icon text-gray-500 hover:text-white">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
         </div>
-        {children}
+        <div className="overflow-y-auto flex-1">
+          {children}
+        </div>
       </div>
     </div>
   )
@@ -134,17 +147,17 @@ export default function Affiliates({ userId }) {
   }
 
   return (
-    <div className="p-4 pt-6 animate-fadeIn">
+    <div className="p-3 pt-4 sm:p-4 sm:pt-6 animate-fadeIn">
       <div className="max-w-6xl mx-auto">
-        <div className="affiliates-section glass-card rounded p-5">
+        <div className="affiliates-section glass-card rounded p-3 sm:p-5">
 
           {/* Tabs */}
-          <div className="flex gap-2 mb-5 border-b border-white/10">
+          <div className="flex gap-2 mb-4 sm:mb-5 border-b border-white/10">
             {['outreach', 'affiliates'].map(t => (
               <button
                 key={t}
                 onClick={() => setTab(t)}
-                className={`px-4 py-2 font-medium text-sm transition-all border-b-2 -mb-px capitalize ${
+                className={`flex-1 sm:flex-none px-4 py-3 sm:py-2 font-medium text-sm transition-all border-b-2 -mb-px capitalize ${
                   tab === t ? 'text-brand-accent border-brand-accent' : 'text-gray-400 border-transparent hover:text-white'
                 }`}
               >
@@ -164,7 +177,7 @@ export default function Affiliates({ userId }) {
 
               {/* Add/Edit modal */}
               <Modal isOpen={showOutreachForm} onClose={() => { setShowOutreachForm(false); setEditingOutreachId(null) }} title={editingOutreachId ? 'Edit Outreach' : 'New Outreach'}>
-                <div className="p-4 grid grid-cols-2 gap-3">
+                <div className="p-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="text-gray-400 text-xs">Name</label>
                     <input value={outreachForm.name} onChange={e => setOutreachForm(p => ({ ...p, name: e.target.value }))} className="w-full mt-1 px-2 py-1.5 bg-brand-dark border border-white/10 rounded text-white text-sm outline-none focus:border-brand-accent/40" autoFocus />
@@ -193,7 +206,7 @@ export default function Affiliates({ userId }) {
                       {RESPONSES.map(r => <option key={r}>{r}</option>)}
                     </select>
                   </div>
-                  <div className="col-span-2">
+                  <div className="sm:col-span-2">
                     <label className="text-gray-400 text-xs">Notes</label>
                     <textarea value={outreachForm.notes} onChange={e => setOutreachForm(p => ({ ...p, notes: e.target.value }))} rows={3} className="w-full mt-1 px-2 py-1.5 bg-brand-dark border border-white/10 rounded text-white text-sm outline-none resize-none focus:border-brand-accent/40" />
                   </div>
@@ -204,7 +217,8 @@ export default function Affiliates({ userId }) {
                 </div>
               </Modal>
 
-              <div className="overflow-x-auto">
+              {/* Desktop table */}
+              <div className="hidden sm:block overflow-x-auto">
                 <table className="w-full">
                   <thead>
                     <tr className="border-b border-white/10">
@@ -256,6 +270,50 @@ export default function Affiliates({ userId }) {
                   </tbody>
                 </table>
               </div>
+
+              {/* Mobile card list */}
+              <div className="sm:hidden">
+                {oLoading ? (
+                  <div className="text-center py-8 text-gray-600 text-sm">Loading...</div>
+                ) : sortedOutreach.length === 0 ? (
+                  <div className="text-center py-12 text-gray-500 text-sm">
+                    <p>No outreach yet</p>
+                    <p className="text-xs mt-1 text-gray-600">Tap <span className="text-brand-accent">Add</span> to get started</p>
+                  </div>
+                ) : sortedOutreach.map(item => (
+                  <div key={item.id} className="mobile-card" onClick={() => openEditOutreach(item)}>
+                    <div className="flex items-start justify-between mb-1.5">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center text-white text-sm font-medium">
+                          {item.name}
+                          {item.contacted && <span className="contacted-dot" title={`Contacted ${item.date_contacted}`} />}
+                        </div>
+                        <div className="text-xs text-gray-500 mt-0.5">{item.platform}{item.date_contacted && <> · {item.date_contacted}</>}</div>
+                      </div>
+                      <span className={`px-2 py-0.5 rounded text-[10px] flex-shrink-0 ml-2 ${responseColor(item.response)}`}>
+                        {item.response || 'No response'}
+                      </span>
+                    </div>
+                    {(item.handle || item.email) && (
+                      <div className="text-xs text-brand-accent truncate">{item.handle || item.email}</div>
+                    )}
+                    <div className="flex gap-1 mt-2 pt-2 border-t border-white/5" onClick={e => e.stopPropagation()}>
+                      <button
+                        onClick={() => toggleContacted(item.id)}
+                        className={`flex-1 py-2 rounded text-xs flex items-center justify-center gap-1.5 ${item.contacted ? 'text-orange-400 bg-orange-400/10' : 'text-gray-400 bg-white/5 active:bg-white/10'}`}
+                      >
+                        <Mail /> {item.contacted ? 'Contacted' : 'Mark Contacted'}
+                      </button>
+                      <button
+                        onClick={() => { if (confirm('Delete this contact?')) deleteContact(item.id) }}
+                        className="px-3 py-2 text-red-400 bg-red-500/10 active:bg-red-500/20 rounded"
+                      >
+                        <X />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
@@ -269,24 +327,24 @@ export default function Affiliates({ userId }) {
               </div>
 
               {/* Stats */}
-              <div className="grid grid-cols-3 gap-3 mb-4">
-                <div className="bg-white/5 p-3 rounded border border-white/10">
-                  <div className="text-gray-500 text-xs">Affiliates</div>
-                  <div className="text-xl font-bold text-brand-success">{affiliates.length}</div>
+              <div className="grid grid-cols-3 gap-2 sm:gap-3 mb-4">
+                <div className="bg-white/5 p-2.5 sm:p-3 rounded border border-white/10">
+                  <div className="text-gray-500 text-[10px] sm:text-xs">Affiliates</div>
+                  <div className="text-base sm:text-xl font-bold text-brand-success">{affiliates.length}</div>
                 </div>
-                <div className="bg-white/5 p-3 rounded border border-white/10">
-                  <div className="text-gray-500 text-xs">Total Sales</div>
-                  <div className="text-xl font-bold text-brand-success">${totalSales.toFixed(2)}</div>
+                <div className="bg-white/5 p-2.5 sm:p-3 rounded border border-white/10">
+                  <div className="text-gray-500 text-[10px] sm:text-xs">Total Sales</div>
+                  <div className="text-base sm:text-xl font-bold text-brand-success truncate">${totalSales.toFixed(2)}</div>
                 </div>
-                <div className="bg-white/5 p-3 rounded border border-white/10">
-                  <div className="text-gray-500 text-xs">Commission</div>
-                  <div className="text-xl font-bold text-brand-accent">${totalCommission.toFixed(2)}</div>
+                <div className="bg-white/5 p-2.5 sm:p-3 rounded border border-white/10">
+                  <div className="text-gray-500 text-[10px] sm:text-xs">Commission</div>
+                  <div className="text-base sm:text-xl font-bold text-brand-accent truncate">${totalCommission.toFixed(2)}</div>
                 </div>
               </div>
 
               {/* Add/Edit modal */}
               <Modal isOpen={showAffiliateForm} onClose={() => { setShowAffiliateForm(false); setEditingAffiliateId(null) }} title={editingAffiliateId ? 'Edit Affiliate' : 'New Affiliate'}>
-                <div className="p-4 grid grid-cols-2 gap-3">
+                <div className="p-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="text-gray-400 text-xs">Name</label>
                     <input value={affiliateForm.name} onChange={e => setAffiliateForm(p => ({ ...p, name: e.target.value }))} className="w-full mt-1 px-2 py-1.5 bg-brand-dark border border-white/10 rounded text-white text-sm outline-none focus:border-brand-accent/40" autoFocus />
@@ -331,13 +389,13 @@ export default function Affiliates({ userId }) {
                     <label className="text-brand-accent text-xs font-medium">Commission ($)</label>
                     <input type="number" value={affiliateForm.commission} onChange={e => setAffiliateForm(p => ({ ...p, commission: e.target.value }))} className="w-full mt-1 px-2 py-1.5 bg-brand-dark border border-white/10 rounded text-white text-sm outline-none" />
                   </div>
-                  <div className="col-span-2">
+                  <div className="sm:col-span-2">
                     <label className="text-gray-400 text-xs">Payment Method</label>
                     <select value={affiliateForm.payment_method} onChange={e => setAffiliateForm(p => ({ ...p, payment_method: e.target.value }))} className="w-full mt-1 px-2 py-1.5 bg-brand-dark border border-white/10 rounded text-white text-sm outline-none">
                       {['PayPal', 'Venmo', 'CashApp', 'Bank Transfer', 'Check'].map(m => <option key={m}>{m}</option>)}
                     </select>
                   </div>
-                  <div className="col-span-2">
+                  <div className="sm:col-span-2">
                     <label className="text-gray-400 text-xs">Notes</label>
                     <textarea value={affiliateForm.notes} onChange={e => setAffiliateForm(p => ({ ...p, notes: e.target.value }))} rows={2} className="w-full mt-1 px-2 py-1.5 bg-brand-dark border border-white/10 rounded text-white text-sm outline-none resize-none" />
                   </div>
@@ -352,7 +410,7 @@ export default function Affiliates({ userId }) {
               <Modal isOpen={!!selectedAffiliate} onClose={() => setSelectedAffiliate(null)} title="Affiliate Details">
                 {selectedAffiliate && (
                   <div className="p-4">
-                    <div className="grid grid-cols-2 gap-3 mb-4">
+                    <div className="grid grid-cols-2 sm:grid-cols-2 gap-3 mb-4">
                       <div><span className="text-gray-500 text-xs">Name</span><p className="text-white text-sm mt-0.5">{selectedAffiliate.name}</p></div>
                       <div><span className="text-gray-500 text-xs">Platform</span><p className="text-white text-sm mt-0.5">{selectedAffiliate.platform}</p></div>
                       <div><span className="text-gray-500 text-xs">Handle</span><p className="text-white text-sm mt-0.5">{selectedAffiliate.handle || '-'}</p></div>
@@ -375,7 +433,8 @@ export default function Affiliates({ userId }) {
                 )}
               </Modal>
 
-              <div className="overflow-x-auto">
+              {/* Desktop table */}
+              <div className="hidden sm:block overflow-x-auto">
                 <table className="w-full">
                   <thead>
                     <tr className="border-b border-white/10">
@@ -447,6 +506,48 @@ export default function Affiliates({ userId }) {
                     ))}
                   </tbody>
                 </table>
+              </div>
+
+              {/* Mobile card list */}
+              <div className="sm:hidden">
+                {aLoading ? (
+                  <div className="text-center py-8 text-gray-600 text-sm">Loading...</div>
+                ) : sortedAffiliates.length === 0 ? (
+                  <div className="text-center py-12 text-gray-500 text-sm">
+                    <p>No affiliates yet</p>
+                    <p className="text-xs mt-1 text-gray-600">Tap <span className="text-brand-accent">Add</span> to get started</p>
+                  </div>
+                ) : sortedAffiliates.map(item => (
+                  <div key={item.id} className="mobile-card" onClick={() => setSelectedAffiliate(item)}>
+                    <div className="flex items-start justify-between mb-1.5">
+                      <div className="min-w-0 flex-1">
+                        <div className="text-white text-sm font-medium truncate">{item.name}</div>
+                        <div className="text-xs text-gray-500 mt-0.5">
+                          {item.platform}{item.code && <> · <span className="text-brand-success font-mono">{item.code}</span></>}
+                        </div>
+                      </div>
+                      <span className={`px-2 py-0.5 rounded text-[10px] flex-shrink-0 ml-2 ${statusColor(item.status)}`}>
+                        {item.status}
+                      </span>
+                    </div>
+                    <div className="flex gap-3 text-xs mt-2">
+                      <div className="flex-1">
+                        <div className="text-gray-600">Sales</div>
+                        <div className="text-brand-success font-semibold">${(parseFloat(item.total_sales) || 0).toFixed(2)}</div>
+                      </div>
+                      <div className="flex-1">
+                        <div className="text-gray-600">Commission</div>
+                        <div className="text-brand-accent font-semibold">${(parseFloat(item.commission) || 0).toFixed(2)}</div>
+                      </div>
+                      {item.date_joined && (
+                        <div className="flex-1 text-right">
+                          <div className="text-gray-600">Joined</div>
+                          <div className="text-gray-400">{item.date_joined}</div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           )}

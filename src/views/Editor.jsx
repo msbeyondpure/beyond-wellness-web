@@ -88,7 +88,7 @@ function TreeNode({ node, tree, depth = 0, activeFile, openFolders, onSelect, on
   return (
     <div>
       <div
-        className={`flex items-center gap-1.5 py-0.5 px-2 rounded cursor-pointer group transition-all editor-file-item ${isActive ? 'bg-brand-accent/15 text-white' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'}`}
+        className={`flex items-center gap-1.5 py-1.5 sm:py-0.5 px-2 rounded cursor-pointer group transition-all editor-file-item ${isActive ? 'bg-brand-accent/15 text-white' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5 active:bg-white/10'}`}
         style={{ paddingLeft: `${8 + depth * 14}px` }}
         onClick={() => node.type === 'folder' ? onToggle(node.path) : onSelect(node)}
         onContextMenu={e => { e.preventDefault(); e.stopPropagation(); onCtx(e, node) }}
@@ -153,10 +153,24 @@ export default function Editor({ userId }) {
   const [newItemTarget, setNewItemTarget] = useState(null)  // { parentPath, type:'file'|'folder' }
   const [newItemName, setNewItemName] = useState('')
   const [leftW, setLeftW] = useState(() => parseInt(localStorage.getItem('bwEditorLeftW') || '260', 10))
+  const [showMobileSidebar, setShowMobileSidebar] = useState(false)
   const resizing = useRef(false)
   const textareaRef = useRef(null)
 
   useEffect(() => { localStorage.setItem('bwEditorLeftW', String(leftW)) }, [leftW])
+
+  // Force off split-mode on mobile (no room for it)
+  useEffect(() => {
+    const onResize = () => {
+      if (window.innerWidth < 640 && viewMode === 'split') setViewMode('source')
+    }
+    onResize()
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [viewMode])
+
+  // Auto-close mobile drawer when a file is opened
+  useEffect(() => { if (activeFile) setShowMobileSidebar(false) }, [activeFile?.path])
 
   // ── tree operations ──────────────────────────────────────
   function addNode(name, type, parentPath = '') {
@@ -295,8 +309,7 @@ export default function Editor({ userId }) {
   // ── render ───────────────────────────────────────────────
   return (
     <div
-      className="p-4 pt-6 animate-fadeIn flex gap-3"
-      style={{ height: 'calc(100vh - 40px)' }}
+      className="p-3 pt-4 sm:p-4 sm:pt-6 animate-fadeIn flex gap-3 h-[calc(100vh-136px)] sm:h-[calc(100vh-40px)]"
       onContextMenu={e => {
         if (e.target === e.currentTarget) {
           showCtx(e, [
@@ -308,9 +321,20 @@ export default function Editor({ userId }) {
     >
       <ContextMenu menu={contextMenu} onClose={() => setContextMenu(null)} />
 
+      {/* ── Mobile drawer backdrop ── */}
+      {showMobileSidebar && (
+        <div
+          className="drawer-backdrop sm:hidden"
+          onClick={() => setShowMobileSidebar(false)}
+        />
+      )}
+
       {/* ── LEFT SIDEBAR ── */}
-      <div className="flex-shrink-0 flex flex-col overflow-hidden" style={{ width: leftW + 'px' }}>
-        <div className="glass-card rounded-lg p-3 flex flex-col overflow-hidden h-full">
+      <div
+        className={`${showMobileSidebar ? 'drawer-panel' : 'hidden'} sm:flex sm:relative sm:flex-shrink-0 sm:flex-col sm:overflow-hidden`}
+        style={typeof window !== 'undefined' && window.innerWidth >= 640 ? { width: leftW + 'px' } : {}}
+      >
+        <div className="glass-card sm:rounded-lg p-3 flex flex-col overflow-hidden h-full w-full">
           {/* Header */}
           <div className="flex items-center justify-between mb-3 shrink-0">
             <span className="text-white text-sm font-semibold">Files</span>
@@ -386,17 +410,17 @@ export default function Editor({ userId }) {
         </div>
       </div>
 
-      {/* Resize handle */}
+      {/* Resize handle (desktop only) */}
       <div
         onMouseDown={startResize}
-        className="w-1 flex-shrink-0 cursor-col-resize rounded-full transition-colors hover:bg-brand-accent/30"
+        className="hidden sm:block w-1 flex-shrink-0 cursor-col-resize rounded-full transition-colors hover:bg-brand-accent/30"
         style={{ background: 'rgba(255,255,255,0.04)' }}
       />
 
       {/* ── RIGHT PANEL ── */}
       <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
         {!activeFile ? (
-          <div className="glass-card rounded-lg h-full flex flex-col items-center justify-center text-center p-8"
+          <div className="glass-card rounded-lg h-full flex flex-col items-center justify-center text-center p-6 sm:p-8"
             onContextMenu={e => showCtx(e, [
               { label: 'New File', action: () => { setNewItemTarget({ parentPath: '', type: 'file' }); setNewItemName('') } },
               { label: 'New Folder', action: () => { setNewItemTarget({ parentPath: '', type: 'folder' }); setNewItemName('') } },
@@ -410,17 +434,24 @@ export default function Editor({ userId }) {
               </svg>
             </div>
             <p className="text-gray-500 text-sm">Select a file to edit</p>
-            <p className="text-gray-700 text-xs mt-1">or right-click to create one</p>
-            <div className="mt-6 flex gap-2">
+            <p className="text-gray-700 text-xs mt-1 hidden sm:block">or right-click to create one</p>
+            <div className="mt-6 flex flex-col sm:flex-row gap-2 w-full max-w-xs">
               <button
-                onClick={() => { setNewItemTarget({ parentPath: '', type: 'file' }); setNewItemName('') }}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white rounded text-xs transition-all"
+                onClick={() => setShowMobileSidebar(true)}
+                className="sm:hidden btn-primary flex items-center justify-center gap-1.5 px-3 py-2.5 text-white rounded text-sm"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+                Browse Files
+              </button>
+              <button
+                onClick={() => { setNewItemTarget({ parentPath: '', type: 'file' }); setNewItemName(''); setShowMobileSidebar(true) }}
+                className="flex items-center justify-center gap-1.5 px-3 py-2.5 sm:py-1.5 bg-white/5 hover:bg-white/10 active:bg-white/10 text-gray-400 hover:text-white rounded text-xs transition-all"
               >
                 <Plus /> New File
               </button>
               <button
-                onClick={() => { setNewItemTarget({ parentPath: '', type: 'folder' }); setNewItemName('') }}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white rounded text-xs transition-all"
+                onClick={() => { setNewItemTarget({ parentPath: '', type: 'folder' }); setNewItemName(''); setShowMobileSidebar(true) }}
+                className="flex items-center justify-center gap-1.5 px-3 py-2.5 sm:py-1.5 bg-white/5 hover:bg-white/10 active:bg-white/10 text-gray-400 hover:text-white rounded text-xs transition-all"
               >
                 <FolderPlus /> New Folder
               </button>
@@ -429,7 +460,14 @@ export default function Editor({ userId }) {
         ) : (
           <div className="glass-card rounded-lg flex flex-col overflow-hidden h-full">
             {/* Editor toolbar */}
-            <div className="flex items-center gap-2 px-4 py-2 border-b border-white/5 shrink-0">
+            <div className="flex items-center gap-2 px-2 sm:px-4 py-2 border-b border-white/5 shrink-0">
+              <button
+                onClick={() => setShowMobileSidebar(true)}
+                className="sm:hidden nav-icon flex-shrink-0"
+                title="Show files"
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+              </button>
               <div className="flex items-center gap-1.5 flex-1 min-w-0">
                 <FileIcon ext={getExt(activeFile.name)} />
                 <span className="text-white text-sm font-medium truncate">{activeFile.name}</span>
@@ -437,19 +475,19 @@ export default function Editor({ userId }) {
               </div>
 
               <div className="flex gap-1 shrink-0">
-                {/* View mode tabs */}
+                {/* View mode tabs (no split on mobile) */}
                 <div className="flex gap-0.5 bg-white/5 rounded p-0.5">
                   {[
-                    { v: 'source', label: 'Source' },
+                    { v: 'source', label: 'Source', mobile: true },
                     ...(isMarkdown(activeFile.name) || getExt(activeFile.name) === 'html' ? [
-                      { v: 'preview', label: 'Preview' },
-                      { v: 'split', label: 'Split' },
+                      { v: 'preview', label: 'Preview', mobile: true },
+                      { v: 'split', label: 'Split', mobile: false },
                     ] : [])
-                  ].map(({ v, label }) => (
+                  ].map(({ v, label, mobile }) => (
                     <button
                       key={v}
                       onClick={() => setViewMode(v)}
-                      className={`px-2 py-0.5 rounded text-xs transition-all ${viewMode === v ? 'bg-brand-accent/80 text-white' : 'text-gray-500 hover:text-gray-300'}`}
+                      className={`${mobile ? '' : 'hidden sm:inline'} px-2 py-1 sm:py-0.5 rounded text-xs transition-all ${viewMode === v ? 'bg-brand-accent/80 text-white' : 'text-gray-500 hover:text-gray-300'}`}
                     >
                       {label}
                     </button>
@@ -458,14 +496,14 @@ export default function Editor({ userId }) {
 
                 <button
                   onClick={save}
-                  className={`flex items-center gap-1 px-2 py-1 rounded text-xs transition-all ${
+                  className={`flex items-center gap-1 px-2 py-1.5 sm:py-1 rounded text-xs transition-all ${
                     saveFlash ? 'bg-brand-success/20 text-brand-success' :
                     modified ? 'bg-brand-accent/20 text-brand-accent hover:bg-brand-accent/30' :
                     'text-gray-600 hover:text-gray-400 hover:bg-white/5'
                   }`}
                   title="Save (Ctrl+S)"
                 >
-                  <SaveIcon /> {modified ? 'Save' : 'Saved'}
+                  <SaveIcon /> <span className="hidden sm:inline">{modified ? 'Save' : 'Saved'}</span>
                 </button>
               </div>
             </div>

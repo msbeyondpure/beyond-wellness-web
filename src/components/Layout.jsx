@@ -9,12 +9,27 @@ const RedoIcon = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="non
 const RotateCcw = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
 const Trash2 = () => <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
 
+// Bottom-nav icons
+const TasksIcon = () => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+const AffiliatesIcon = () => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+const FormulasIcon = () => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10 2v7.31"/><path d="M14 9.3V1.99"/><path d="M8.5 2h7"/><path d="M14 9.3a6.5 6.5 0 1 1-4 0"/></svg>
+const EditorIcon = () => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+const MoreIcon = () => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>
+const CloseIcon = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+
 const TABS = ['tasks', 'affiliates', 'formulas', 'editor', 'migrate']
+const PRIMARY_TABS = [
+  { id: 'tasks', label: 'Tasks', icon: <TasksIcon /> },
+  { id: 'affiliates', label: 'Affiliates', icon: <AffiliatesIcon /> },
+  { id: 'formulas', label: 'Formulas', icon: <FormulasIcon /> },
+  { id: 'editor', label: 'Editor', icon: <EditorIcon /> },
+]
 
 export default function Layout({ user, activeView, setActiveView, taskStats, children }) {
   const [showFile, setShowFile] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [showTrash, setShowTrash] = useState(false)
+  const [showMobileMore, setShowMobileMore] = useState(false)
   const [settings, setSettings] = useState(() => {
     try { return JSON.parse(localStorage.getItem('bwSettings')) || { fontSize: 'medium' } } catch { return { fontSize: 'medium' } }
   })
@@ -36,19 +51,30 @@ export default function Layout({ user, activeView, setActiveView, taskStats, chi
     localStorage.setItem('bwSettings', JSON.stringify(settings))
   }, [settings])
 
+  // Lock body scroll when mobile More sheet is open
+  useEffect(() => {
+    document.body.style.overflow = showMobileMore ? 'hidden' : ''
+    return () => { document.body.style.overflow = '' }
+  }, [showMobileMore])
+
   const trashCount = trash.length
+
+  const switchView = (v) => {
+    setActiveView(v)
+    setShowMobileMore(false)
+  }
 
   return (
     <div className="min-h-screen" style={{ background: '#1a1a1a' }}>
-      {/* Top Navbar */}
-      <nav className="glass-card sticky top-0 z-40 border-b border-white/5">
-        <div className="pl-2">
-          <div className="flex items-center justify-between h-10 relative">
+      {/* === Top Navbar === */}
+      <nav className="glass-card sticky top-0 z-40 border-b border-white/5 pt-safe">
+        <div className="px-1 sm:pl-2">
+          <div className="flex items-center justify-between h-12 sm:h-10 relative">
 
             {/* Left: Logo + menus */}
-            <div className="flex items-center gap-1 z-10">
-              <div className="w-4 h-4 rounded mr-1 bg-brand-accent/80 flex items-center justify-center">
-                <div className="w-2 h-2 rounded-sm bg-white/80" />
+            <div className="flex items-center gap-0.5 sm:gap-1 z-10">
+              <div className="w-5 h-5 sm:w-4 sm:h-4 rounded ml-2 mr-1 bg-brand-accent/80 flex items-center justify-center flex-shrink-0">
+                <div className="w-2.5 h-2.5 sm:w-2 sm:h-2 rounded-sm bg-white/80" />
               </div>
 
               {/* File menu */}
@@ -74,17 +100,20 @@ export default function Layout({ user, activeView, setActiveView, taskStats, chi
                   <SettingsIcon />
                 </button>
                 {showSettings && (
-                  <div className="absolute top-full left-0 mt-1 menu-dropdown rounded p-4 min-w-64 animate-fadeIn z-50" onClick={e => e.stopPropagation()}>
+                  <div className="absolute top-full left-0 mt-1 menu-dropdown rounded p-4 w-72 max-w-[calc(100vw-1rem)] animate-fadeIn z-50" onClick={e => e.stopPropagation()}>
                     <h4 className="text-white font-medium mb-3 text-sm">Settings</h4>
                     <div className="space-y-3">
                       <div>
                         <label className="text-gray-400 text-xs mb-1 block">Font Size</label>
-                        <select value={settings.fontSize} onChange={e => setSettings(s => ({ ...s, fontSize: e.target.value }))} className="w-full px-2 py-1.5 bg-white/10 border border-white/10 rounded text-white text-sm">
+                        <select value={settings.fontSize} onChange={e => setSettings(s => ({ ...s, fontSize: e.target.value }))} className="w-full px-2 py-2 bg-white/10 border border-white/10 rounded text-white text-sm">
                           <option value="small">Small</option>
                           <option value="medium">Medium</option>
                           <option value="large">Large</option>
                         </select>
                       </div>
+                      {user && (
+                        <div className="text-xs text-gray-500 truncate" title={user.email}>{user.email}</div>
+                      )}
                       {!isConfigured && (
                         <div className="pt-2 border-t border-white/10">
                           <p className="text-xs text-gray-500">Running in local mode. Add Supabase credentials to <code className="bg-black/30 px-1 rounded">.env.local</code> for cloud sync.</p>
@@ -92,7 +121,7 @@ export default function Layout({ user, activeView, setActiveView, taskStats, chi
                       )}
                       {isConfigured && (
                         <div className="pt-2 border-t border-white/10">
-                          <button onClick={() => supabase.auth.signOut()} className="w-full px-3 py-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 rounded text-red-400 text-sm transition-all">
+                          <button onClick={() => supabase.auth.signOut()} className="w-full px-3 py-2.5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 rounded text-red-400 text-sm transition-all">
                             Sign Out
                           </button>
                         </div>
@@ -107,11 +136,11 @@ export default function Layout({ user, activeView, setActiveView, taskStats, chi
                 <button onClick={e => { e.stopPropagation(); setShowTrash(v => !v); setShowFile(false); setShowSettings(false) }} className="nav-icon relative" title="Recycle Bin">
                   <TrashBin />
                   {trashCount > 0 && (
-                    <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full text-[10px] flex items-center justify-center text-white">{trashCount}</span>
+                    <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-red-500 rounded-full text-[10px] flex items-center justify-center text-white">{trashCount}</span>
                   )}
                 </button>
                 {showTrash && (
-                  <div className="absolute top-full left-0 mt-1 menu-dropdown rounded p-3 min-w-80 max-h-96 overflow-y-auto animate-fadeIn z-50" onClick={e => e.stopPropagation()}>
+                  <div className="absolute top-full left-0 mt-1 menu-dropdown rounded p-3 w-80 max-w-[calc(100vw-1rem)] max-h-96 overflow-y-auto animate-fadeIn z-50" onClick={e => e.stopPropagation()}>
                     <div className="flex items-center justify-between mb-2">
                       <h4 className="text-white font-medium text-sm">Recycle Bin</h4>
                       {trashCount > 0 && (
@@ -129,10 +158,9 @@ export default function Layout({ user, activeView, setActiveView, taskStats, chi
                           <div key={i} className="flex items-center justify-between bg-white/5 p-2 rounded text-xs">
                             <span className="text-gray-300 truncate flex-1">{item.text} <span className="text-gray-500">({item.category})</span></span>
                             <button onClick={() => {
-                              // restore: dispatch custom event that Tasks view listens to
                               window.dispatchEvent(new CustomEvent('restore-task', { detail: item }))
                               setTrash(prev => { const next = prev.filter((_, j) => j !== i); localStorage.setItem('bwTrashTasks', JSON.stringify(next)); return next })
-                            }} className="text-brand-accent hover:text-white ml-2" title="Restore">
+                            }} className="text-brand-accent hover:text-white ml-2 p-1" title="Restore">
                               <RotateCcw />
                             </button>
                           </div>
@@ -144,8 +172,8 @@ export default function Layout({ user, activeView, setActiveView, taskStats, chi
               </div>
             </div>
 
-            {/* Center: Tabs (absolutely centered) */}
-            <div className="absolute left-1/2 -translate-x-1/2 flex gap-1">
+            {/* Center: Tabs (desktop only) */}
+            <div className="hidden sm:flex absolute left-1/2 -translate-x-1/2 gap-1">
               {TABS.map(v => (
                 <button
                   key={v}
@@ -157,15 +185,20 @@ export default function Layout({ user, activeView, setActiveView, taskStats, chi
               ))}
             </div>
 
+            {/* Mobile: current view name (centered) */}
+            <div className="sm:hidden absolute left-1/2 -translate-x-1/2 text-sm font-semibold text-white capitalize pointer-events-none">
+              {activeView}
+            </div>
+
             {/* Right: stats */}
             <div className="flex items-center gap-2 z-10 pr-3">
-              {taskStats && (
+              {taskStats && activeView === 'tasks' && (
                 <span className="text-xs text-gray-500">
                   <span className="text-brand-accent">{taskStats.done}</span>/{taskStats.total}
                 </span>
               )}
               {!isConfigured && (
-                <span className="text-xs text-gray-600" title="Local mode — data in browser only">local</span>
+                <span className="hidden sm:inline text-xs text-gray-600" title="Local mode — data in browser only">local</span>
               )}
             </div>
 
@@ -173,10 +206,75 @@ export default function Layout({ user, activeView, setActiveView, taskStats, chi
         </div>
       </nav>
 
-      {/* Page content */}
-      <div className={settings.fontSize === 'small' ? 'text-sm' : settings.fontSize === 'large' ? 'text-lg' : 'text-base'}>
+      {/* === Page content (with bottom-nav padding on mobile) === */}
+      <div className={`${settings.fontSize === 'small' ? 'text-sm' : settings.fontSize === 'large' ? 'text-lg' : 'text-base'} pb-20 sm:pb-0`}>
         {children}
       </div>
+
+      {/* === Mobile bottom tab bar === */}
+      <nav className="mobile-bottom-nav sm:hidden">
+        {PRIMARY_TABS.map(t => (
+          <button
+            key={t.id}
+            onClick={() => switchView(t.id)}
+            className={activeView === t.id ? 'active' : ''}
+          >
+            {t.icon}
+            <span>{t.label}</span>
+          </button>
+        ))}
+        <button
+          onClick={() => setShowMobileMore(true)}
+          className={activeView === 'migrate' ? 'active' : ''}
+        >
+          <MoreIcon />
+          <span>More</span>
+        </button>
+      </nav>
+
+      {/* === Mobile More sheet === */}
+      {showMobileMore && (
+        <>
+          <div
+            className="fixed inset-0 bg-black/60 z-50 sm:hidden animate-fadeIn"
+            onClick={() => setShowMobileMore(false)}
+          />
+          <div
+            className="fixed bottom-0 left-0 right-0 z-50 sm:hidden glass-card rounded-t-2xl border-t border-brand-accent/20 pb-safe"
+            style={{ animation: 'drawerSlideIn 0.22s ease', transform: 'none' }}
+          >
+            <div className="flex items-center justify-between px-5 py-4 border-b border-white/5">
+              <h3 className="text-white font-semibold text-base">More</h3>
+              <button onClick={() => setShowMobileMore(false)} className="nav-icon">
+                <CloseIcon />
+              </button>
+            </div>
+            <div className="p-3 space-y-1">
+              <button
+                onClick={() => switchView('migrate')}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded text-left transition-all ${activeView === 'migrate' ? 'bg-brand-accent/20 text-brand-accent' : 'text-gray-300 hover:bg-white/5 active:bg-white/10'}`}
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                <span className="text-sm font-medium">Migrate Desktop Data</span>
+              </button>
+              {isConfigured && (
+                <button
+                  onClick={() => { setShowMobileMore(false); supabase.auth.signOut() }}
+                  className="w-full flex items-center gap-3 px-4 py-3 rounded text-left text-red-400 hover:bg-red-500/10 active:bg-red-500/20 transition-all"
+                >
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                  <span className="text-sm font-medium">Sign Out</span>
+                </button>
+              )}
+              {user && (
+                <div className="px-4 py-3 text-xs text-gray-500 border-t border-white/5 mt-2">
+                  Signed in as <span className="text-gray-300">{user.email}</span>
+                </div>
+              )}
+            </div>
+          </div>
+        </>
+      )}
     </div>
   )
 }
