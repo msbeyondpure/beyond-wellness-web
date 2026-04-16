@@ -261,23 +261,25 @@ export default function Formulas({ userId }) {
               {localFormulas.length === 0 ? (
                 <p className="text-gray-500 text-sm text-center py-4">No formulas yet</p>
               ) : localFormulas.map(f => (
-                <div
-                  key={f.id}
-                  onClick={() => setActiveId(f.id)}
-                  className={`p-2 rounded cursor-pointer transition-all group ${f.id === activeId ? 'bg-brand-accent/20 text-white border border-brand-accent/30' : 'text-gray-400 hover:bg-white/5 hover:text-gray-200 border border-transparent'}`}
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm truncate flex-1">{f.name}</span>
-                    <button
-                      onClick={e => { e.stopPropagation(); if (confirm('Delete this formula?')) { deleteFormula(f.id); if (activeId === f.id) setActiveId(null) } }}
-                      className="opacity-0 group-hover:opacity-100 p-1 text-red-400 hover:bg-white/10 rounded transition-all"
-                    >
-                      <Trash />
-                    </button>
-                  </div>
-                  <div className="text-xs text-gray-500 mt-0.5">
-                    {f.ingredients?.length || 0} ingredient{(f.ingredients?.length || 0) !== 1 ? 's' : ''}
-                  </div>
+                <div key={f.id} className="relative group">
+                  <button
+                    onTouchStart={() => {}}  // activates :active on iOS
+                    onClick={() => setActiveId(f.id)}
+                    className={`w-full text-left p-3 rounded transition-all ${f.id === activeId ? 'bg-brand-accent/20 text-white border border-brand-accent/30' : 'text-gray-400 active:bg-white/10 hover:bg-white/5 hover:text-gray-200 border border-transparent'}`}
+                    style={{ touchAction: 'manipulation' }}
+                  >
+                    <div className="text-sm truncate pr-6">{f.name}</div>
+                    <div className="text-xs text-gray-500 mt-0.5">
+                      {f.ingredients?.length || 0} ingredient{(f.ingredients?.length || 0) !== 1 ? 's' : ''}
+                    </div>
+                  </button>
+                  <button
+                    onClick={e => { e.stopPropagation(); if (confirm('Delete this formula?')) { deleteFormula(f.id); if (activeId === f.id) setActiveId(null) } }}
+                    className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 p-2 text-red-400 hover:bg-white/10 rounded transition-all"
+                    style={{ touchAction: 'manipulation' }}
+                  >
+                    <Trash />
+                  </button>
                 </div>
               ))}
             </div>
