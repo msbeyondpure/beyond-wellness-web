@@ -5,6 +5,7 @@ import Tasks from './views/Tasks'
 import Formulas from './views/Formulas'
 import Affiliates from './views/Affiliates'
 import Editor from './views/Editor'
+import Migrate from './views/Migrate'
 import Layout from './components/Layout'
 import LoadingScreen from './components/LoadingScreen'
 
@@ -21,6 +22,7 @@ export default function App() {
     formulas: <Formulas userId={user.id} />,
     affiliates: <Affiliates userId={user.id} />,
     editor: <Editor userId={user.id} />,
+    migrate: <Migrate userId={user.id} />,
   }
 
   return (
