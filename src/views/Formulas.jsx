@@ -350,180 +350,152 @@ export default function Formulas({ userId }) {
                 </div>
               </div>
 
-              {/* Ingredient table */}
-              <div className="flex-1 overflow-y-auto">
-                <div className="pr-1">
-                  {/* Column headers (desktop only) */}
-                  <div
-                    style={{ display: 'grid', gridTemplateColumns: gridTemplate, columnGap: 8, marginBottom: 4, paddingRight: 4 }}
-                    className="border-b border-white/5 pb-2 hidden sm:grid"
-                  >
-                    <div />
-                    <div className="text-xs text-gray-600 font-medium uppercase tracking-wider">Ingredient</div>
-                    <div className="flex items-center">
-                      <span className="text-xs text-gray-600 font-medium uppercase tracking-wider flex-1">Amount</span>
-                      <ResizeHandle col="amount" />
-                    </div>
-                    <div className="flex items-center">
-                      <span className="text-xs text-gray-600 font-medium uppercase tracking-wider flex-1">Ratio</span>
-                      <ResizeHandle col="ratio" />
-                    </div>
-                    <div className="flex items-center">
-                      <span className="text-xs text-gray-600 font-medium uppercase tracking-wider flex-1">Cost ($)</span>
-                      <ResizeHandle col="cost" />
-                    </div>
-                    <div />
-                  </div>
-
-                  {/* Ingredient rows */}
-                  {active.ingredients.map(ing => {
-                    const previewVal = getRatioPreview(active, ing, ratioPreview.sourceId, ratioPreview.sourceValue)
-                    const isSource = ratioPreview.sourceId === ing.id
-                    const showingPreview = previewVal !== null
-
-                    const nameInput = (
-                      <input
-                        value={ing.name}
-                        onChange={e => updateIngredient(active.id, ing.id, { name: e.target.value })}
-                        onBlur={() => saveIngredient(active.id)}
-                        placeholder="Ingredient name"
-                        style={{ minWidth: 0, background: 'transparent', border: 'none', outline: 'none', color: '#e5e5e5', fontSize: 13 }}
-                        className="placeholder-gray-700"
-                      />
-                    )
-                    const amountInput = (
-                      <input
-                        value={ing.amount}
-                        onChange={e => updateIngredient(active.id, ing.id, { amount: e.target.value })}
-                        onBlur={() => saveIngredient(active.id)}
-                        placeholder="e.g. 100g"
-                        style={{ minWidth: 0, width: '100%', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 3, padding: '6px 8px', color: '#e5e5e5', fontSize: 13, outline: 'none' }}
-                      />
-                    )
-                    const ratioInput = (
-                      <div style={{ position: 'relative', minWidth: 0, width: '100%' }}>
-                        <input
-                          value={isSource ? ratioPreview.sourceValue : (showingPreview ? previewVal : (ing.ratio || ''))}
-                          readOnly={showingPreview && !isSource}
-                          onChange={e => {
-                            if (isSource || ratioPreview.sourceId === null) {
-                              setRatioPreview({ sourceId: ing.id, sourceValue: e.target.value })
-                            }
-                          }}
-                          onFocus={() => {
-                            if (!isSource) setRatioPreview({ sourceId: ing.id, sourceValue: ing.ratio || '' })
-                          }}
-                          onBlur={() => {
-                            if (isSource) {
-                              const updated = updateIngredient(active.id, ing.id, { ratio: ratioPreview.sourceValue })
-                              if (updated) handleSave(updated)
-                            }
-                            setRatioPreview({ sourceId: null, sourceValue: '' })
-                          }}
-                          placeholder="ratio"
-                          style={{
-                            minWidth: 0, width: '100%',
-                            background: isSource ? 'rgba(196,94,44,0.1)' : showingPreview ? 'rgba(139,154,62,0.08)' : 'rgba(255,255,255,0.03)',
-                            border: isSource ? '1px solid rgba(196,94,44,0.4)' : '1px solid rgba(255,255,255,0.06)',
-                            borderRadius: 3, padding: '6px 8px',
-                            color: showingPreview && !isSource ? '#8b9a3e' : '#e5e5e5',
-                            fontSize: 13, outline: 'none',
-                            cursor: showingPreview && !isSource ? 'default' : 'text'
-                          }}
-                        />
-                        {!ing.includeInRatio && (
-                          <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.3)', borderRadius: 3, pointerEvents: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                            <span style={{ fontSize: 10, color: '#555' }}>excl.</span>
-                          </div>
-                        )}
+              {/* Ingredient table — horizontal scroll on mobile */}
+              <div className="flex-1 overflow-y-auto min-h-0">
+                {/* Scrollable grid area */}
+                <div className="overflow-x-auto" style={{ WebkitOverflowScrolling: 'touch' }}>
+                  <div style={{ minWidth: 480 }}>
+                    {/* Column headers */}
+                    <div
+                      style={{ display: 'grid', gridTemplateColumns: gridTemplate, columnGap: 8, marginBottom: 4, paddingRight: 4 }}
+                      className="border-b border-white/5 pb-2"
+                    >
+                      <div />
+                      <div className="text-xs text-gray-600 font-medium uppercase tracking-wider">Ingredient</div>
+                      <div className="flex items-center">
+                        <span className="text-xs text-gray-600 font-medium uppercase tracking-wider flex-1">Amount</span>
+                        <ResizeHandle col="amount" />
                       </div>
-                    )
-                    const costInput = (
-                      <input
-                        value={ing.cost}
-                        onChange={e => updateIngredient(active.id, ing.id, { cost: e.target.value })}
-                        onBlur={() => saveIngredient(active.id)}
-                        placeholder="0.00"
-                        style={{ minWidth: 0, width: '100%', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 3, padding: '6px 8px', color: '#e5e5e5', fontSize: 13, outline: 'none' }}
-                      />
-                    )
-                    const ratioToggle = (
-                      <button
-                        title={ing.includeInRatio ? 'Included in ratio' : 'Excluded from ratio'}
-                        onClick={() => {
-                          const updated = updateIngredient(active.id, ing.id, { includeInRatio: !ing.includeInRatio })
-                          if (updated) handleSave(updated)
-                        }}
-                        style={{ width: 14, height: 14, borderRadius: 3, border: '1px solid', flexShrink: 0, borderColor: ing.includeInRatio ? '#c45e2c' : 'rgba(255,255,255,0.15)', background: ing.includeInRatio ? 'rgba(196,94,44,0.2)' : 'transparent' }}
-                      />
-                    )
-                    const removeBtn = (
-                      <button
-                        onClick={() => removeIngredient(active.id, ing.id)}
-                        className="text-gray-700 hover:text-red-400 active:text-red-400 transition-all flex items-center justify-center sm:opacity-0 sm:group-hover:opacity-100"
-                      >
-                        <Trash />
-                      </button>
-                    )
+                      <div className="flex items-center">
+                        <span className="text-xs text-gray-600 font-medium uppercase tracking-wider flex-1">Ratio</span>
+                        <ResizeHandle col="ratio" />
+                      </div>
+                      <div className="flex items-center">
+                        <span className="text-xs text-gray-600 font-medium uppercase tracking-wider flex-1">Cost ($)</span>
+                        <ResizeHandle col="cost" />
+                      </div>
+                      <div />
+                    </div>
 
-                    return (
-                      <div key={ing.id} className="group">
-                        {/* Desktop row (grid) */}
+                    {/* Ingredient rows */}
+                    {active.ingredients.map(ing => {
+                      const previewVal = getRatioPreview(active, ing, ratioPreview.sourceId, ratioPreview.sourceValue)
+                      const isSource = ratioPreview.sourceId === ing.id
+                      const showingPreview = previewVal !== null
+
+                      return (
                         <div
-                          className="hidden sm:grid"
-                          style={{ gridTemplateColumns: gridTemplate, columnGap: 8, alignItems: 'center', paddingRight: 4, paddingTop: 3, paddingBottom: 3 }}
+                          key={ing.id}
+                          className="group"
+                          style={{ display: 'grid', gridTemplateColumns: gridTemplate, columnGap: 8, alignItems: 'center', paddingRight: 4, paddingTop: 3, paddingBottom: 3 }}
                         >
-                          <div className="flex items-center">{ratioToggle}</div>
-                          {nameInput}
-                          {amountInput}
-                          {ratioInput}
-                          {costInput}
-                          {removeBtn}
-                        </div>
-
-                        {/* Mobile row (stacked card) */}
-                        <div className="sm:hidden bg-white/[0.03] border border-white/5 rounded p-2.5 mb-2">
-                          <div className="flex items-center gap-2 mb-2">
-                            {ratioToggle}
-                            <div className="flex-1 min-w-0">{nameInput}</div>
-                            {removeBtn}
+                          {/* Ratio-include checkbox */}
+                          <div className="flex items-center">
+                            <button
+                              title={ing.includeInRatio ? 'Included in ratio' : 'Excluded from ratio'}
+                              onClick={() => {
+                                const updated = updateIngredient(active.id, ing.id, { includeInRatio: !ing.includeInRatio })
+                                if (updated) handleSave(updated)
+                              }}
+                              style={{ width: 14, height: 14, borderRadius: 3, border: '1px solid', flexShrink: 0, borderColor: ing.includeInRatio ? '#c45e2c' : 'rgba(255,255,255,0.15)', background: ing.includeInRatio ? 'rgba(196,94,44,0.2)' : 'transparent' }}
+                            />
                           </div>
-                          <div className="grid grid-cols-3 gap-2">
-                            <div>
-                              <div className="text-[10px] text-gray-600 mb-0.5 uppercase tracking-wider">Amount</div>
-                              {amountInput}
-                            </div>
-                            <div>
-                              <div className="text-[10px] text-gray-600 mb-0.5 uppercase tracking-wider">Ratio</div>
-                              {ratioInput}
-                            </div>
-                            <div>
-                              <div className="text-[10px] text-gray-600 mb-0.5 uppercase tracking-wider">Cost $</div>
-                              {costInput}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    )
-                  })}
 
-                  {/* Add ingredient */}
+                          {/* Name */}
+                          <input
+                            value={ing.name}
+                            onChange={e => updateIngredient(active.id, ing.id, { name: e.target.value })}
+                            onBlur={() => saveIngredient(active.id)}
+                            placeholder="Ingredient name"
+                            style={{ minWidth: 0, background: 'transparent', border: 'none', outline: 'none', color: '#e5e5e5', fontSize: 13 }}
+                            className="placeholder-gray-700"
+                          />
+
+                          {/* Amount */}
+                          <input
+                            value={ing.amount}
+                            onChange={e => updateIngredient(active.id, ing.id, { amount: e.target.value })}
+                            onBlur={() => saveIngredient(active.id)}
+                            placeholder="e.g. 100g"
+                            style={{ minWidth: 0, width: '100%', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 3, padding: '3px 6px', color: '#e5e5e5', fontSize: 13, outline: 'none' }}
+                          />
+
+                          {/* Ratio */}
+                          <div style={{ position: 'relative', minWidth: 0 }}>
+                            <input
+                              value={isSource ? ratioPreview.sourceValue : (showingPreview ? previewVal : (ing.ratio || ''))}
+                              readOnly={showingPreview && !isSource}
+                              onChange={e => {
+                                if (isSource || ratioPreview.sourceId === null) {
+                                  setRatioPreview({ sourceId: ing.id, sourceValue: e.target.value })
+                                }
+                              }}
+                              onFocus={() => {
+                                if (!isSource) setRatioPreview({ sourceId: ing.id, sourceValue: ing.ratio || '' })
+                              }}
+                              onBlur={() => {
+                                if (isSource) {
+                                  const updated = updateIngredient(active.id, ing.id, { ratio: ratioPreview.sourceValue })
+                                  if (updated) handleSave(updated)
+                                }
+                                setRatioPreview({ sourceId: null, sourceValue: '' })
+                              }}
+                              placeholder="ratio"
+                              style={{
+                                minWidth: 0, width: '100%',
+                                background: isSource ? 'rgba(196,94,44,0.1)' : showingPreview ? 'rgba(139,154,62,0.08)' : 'rgba(255,255,255,0.03)',
+                                border: isSource ? '1px solid rgba(196,94,44,0.4)' : '1px solid rgba(255,255,255,0.06)',
+                                borderRadius: 3, padding: '3px 6px',
+                                color: showingPreview && !isSource ? '#8b9a3e' : '#e5e5e5',
+                                fontSize: 13, outline: 'none',
+                                cursor: showingPreview && !isSource ? 'default' : 'text'
+                              }}
+                            />
+                            {!ing.includeInRatio && (
+                              <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.3)', borderRadius: 3, pointerEvents: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                <span style={{ fontSize: 10, color: '#555' }}>excl.</span>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Cost */}
+                          <input
+                            value={ing.cost}
+                            onChange={e => updateIngredient(active.id, ing.id, { cost: e.target.value })}
+                            onBlur={() => saveIngredient(active.id)}
+                            placeholder="0.00"
+                            style={{ minWidth: 0, width: '100%', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 3, padding: '3px 6px', color: '#e5e5e5', fontSize: 13, outline: 'none' }}
+                          />
+
+                          {/* Remove */}
+                          <button
+                            onClick={() => removeIngredient(active.id, ing.id)}
+                            className="opacity-100 sm:opacity-0 group-hover:opacity-100 text-gray-600 hover:text-red-400 active:text-red-400 transition-all flex items-center justify-center"
+                          >
+                            <Trash />
+                          </button>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+
+                {/* Below-grid controls — full width, no horizontal scroll */}
+                <div className="mt-2">
                   <button
                     onClick={() => addIngredient(active.id)}
-                    className="mt-3 flex items-center gap-1.5 text-xs sm:text-xs text-gray-500 hover:text-brand-accent active:text-brand-accent transition-colors py-3 sm:py-1.5 px-3 sm:px-0 w-full sm:w-auto justify-center sm:justify-start bg-white/5 sm:bg-transparent border border-dashed border-white/10 sm:border-none rounded"
+                    className="flex items-center gap-1.5 text-xs text-gray-600 hover:text-brand-accent active:text-brand-accent transition-colors py-2 px-1"
                   >
                     <Plus /> Add ingredient
                   </button>
 
-                  {/* Total cost */}
                   {active.ingredients.length > 0 && (
-                    <div className="mt-4 pt-3 border-t border-white/5 flex items-center justify-between">
+                    <div className="mt-3 pt-3 border-t border-white/5 flex items-center justify-between">
                       <span className="text-xs text-gray-600">Total Cost</span>
                       <span className="text-sm font-semibold text-brand-accent">${getTotalCost(active).toFixed(2)}</span>
                     </div>
                   )}
 
-                  {/* Notes */}
                   <div className="mt-5 pt-4 border-t border-white/5">
                     <label className="text-xs text-gray-600 block mb-1.5">Notes</label>
                     <textarea
