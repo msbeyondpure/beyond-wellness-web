@@ -1,51 +1,59 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase, isConfigured } from '../lib/supabase'
 
-// ── localStorage helpers ──────────────────────────────────────────────────────
 function lsGet(key, fallback) {
   try { return JSON.parse(localStorage.getItem(key)) ?? fallback } catch { return fallback }
 }
 function lsSet(key, val) { localStorage.setItem(key, JSON.stringify(val)) }
-
 function uid() { return Date.now() + '-' + Math.random().toString(36).slice(2) }
 
-// ── hook ──────────────────────────────────────────────────────────────────────
 export function useTasks(userId) {
   const [tasks, setTasks] = useState([])
   const [categoryOrder, setCategoryOrderState] = useState([])
   const [loading, setLoading] = useState(true)
 
-  // ── local mode ──
+  // ── local mode ────────────────────────────────────────────────────────────
   useEffect(() => {
     if (isConfigured) return
-    const raw = lsGet('bwTasks', [])
-    // Desktop format is an array of { id, category, text, completed, ... }
-    setTasks(raw)
+    setTasks(lsGet('bwTasks', []))
     setLoading(false)
   }, [])
 
-  // ── supabase mode ──
+  // ── supabase mode: load + poll + realtime ─────────────────────────────────
   useEffect(() => {
     if (!isConfigured || !userId || userId === 'local') return
+
+    async function loadAll() {
+      const [{ data: tasksData }, { data: catData }] = await Promise.all([
+        supabase.from('tasks').select('*').eq('user_id', userId).order('sort_order'),
+        supabase.from('category_order').select('*').eq('user_id', userId).maybeSingle()
+      ])
+      setTasks(tasksData || [])
+      setCategoryOrderState(catData?.order_list || [])
+      setLoading(false)
+    }
+
     loadAll()
 
-    const channel = supabase
-      .channel('tasks-' + userId)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks', filter: `user_id=eq.${userId}` }, () => loadAll())
+    // Poll every 4 s — guaranteed live updates regardless of realtime config
+    const interval = setInterval(loadAll, 4000)
+
+    // Instant refresh when this tab regains focus
+    const onVisibility = () => { if (document.visibilityState === 'visible') loadAll() }
+    document.addEventListener('visibilitychange', onVisibility)
+
+    // Realtime (instant if supabase_realtime publication is enabled)
+    const channel = supabase.channel('tasks-' + userId)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks',          filter: `user_id=eq.${userId}` }, loadAll)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'category_order', filter: `user_id=eq.${userId}` }, loadAll)
       .subscribe()
 
-    return () => supabase.removeChannel(channel)
+    return () => {
+      clearInterval(interval)
+      document.removeEventListener('visibilitychange', onVisibility)
+      supabase.removeChannel(channel)
+    }
   }, [userId])
-
-  async function loadAll() {
-    const [{ data: tasksData }, { data: catData }] = await Promise.all([
-      supabase.from('tasks').select('*').eq('user_id', userId).order('sort_order'),
-      supabase.from('category_order').select('*').eq('user_id', userId).maybeSingle()
-    ])
-    setTasks(tasksData || [])
-    setCategoryOrderState(catData?.order_list || [])
-    setLoading(false)
-  }
 
   const addTask = useCallback(async (category, text) => {
     if (!isConfigured) {

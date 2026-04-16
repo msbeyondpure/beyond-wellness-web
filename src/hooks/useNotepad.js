@@ -2,11 +2,11 @@ import { useState, useEffect, useRef } from 'react'
 import { supabase, isConfigured } from '../lib/supabase'
 
 export function useNotepad(userId) {
-  const [content, setContent] = useState('')
-  const [loaded, setLoaded] = useState(false)
-  const debounceRef   = useRef(null)
-  const dbContentRef  = useRef('')  // last value known to be in DB
-  const isDirtyRef    = useRef(false) // true while local edits haven't been flushed yet
+  const [content, setContent]   = useState('')
+  const [loaded, setLoaded]     = useState(false)
+  const debounceRef  = useRef(null)
+  const dbContentRef = useRef('')   // last value known to be in DB
+  const isDirtyRef   = useRef(false) // true while unsaved local edits exist
 
   useEffect(() => {
     if (!isConfigured) {
@@ -20,11 +20,15 @@ export function useNotepad(userId) {
       const { data } = await supabase.from('notepad').select('content').eq('user_id', userId).maybeSingle()
       const c = data?.content || ''
       dbContentRef.current = c
-      // Only apply remote value if no pending local edits
+      // Only apply remote value when no pending local edits
       if (!isDirtyRef.current) setContent(c)
       setLoaded(true)
     }
+
     loadNotepad()
+    const interval = setInterval(loadNotepad, 4000)
+    const onVisibility = () => { if (document.visibilityState === 'visible') loadNotepad() }
+    document.addEventListener('visibilitychange', onVisibility)
 
     const channel = supabase.channel('notepad-' + userId)
       .on('postgres_changes',
@@ -32,13 +36,16 @@ export function useNotepad(userId) {
         (payload) => {
           const newC = payload.new?.content ?? ''
           dbContentRef.current = newC
-          // Only overwrite editor if we have no unsaved local changes
           if (!isDirtyRef.current) setContent(newC)
         }
       )
       .subscribe()
 
-    return () => supabase.removeChannel(channel)
+    return () => {
+      clearInterval(interval)
+      document.removeEventListener('visibilitychange', onVisibility)
+      supabase.removeChannel(channel)
+    }
   }, [userId])
 
   function updateContent(val) {

@@ -9,7 +9,7 @@ function uid() { return Date.now() + '-' + Math.random().toString(36).slice(2) }
 
 export function useOutreach(userId) {
   const [contacts, setContacts] = useState([])
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading]   = useState(true)
 
   useEffect(() => {
     if (!isConfigured) {
@@ -24,13 +24,21 @@ export function useOutreach(userId) {
       setContacts(data || [])
       setLoading(false)
     }
+
     loadAll()
+    const interval = setInterval(loadAll, 4000)
+    const onVisibility = () => { if (document.visibilityState === 'visible') loadAll() }
+    document.addEventListener('visibilitychange', onVisibility)
 
     const channel = supabase.channel('outreach-' + userId)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'outreach', filter: `user_id=eq.${userId}` }, loadAll)
       .subscribe()
 
-    return () => supabase.removeChannel(channel)
+    return () => {
+      clearInterval(interval)
+      document.removeEventListener('visibilitychange', onVisibility)
+      supabase.removeChannel(channel)
+    }
   }, [userId])
 
   const addContact = useCallback(async (fields = {}) => {

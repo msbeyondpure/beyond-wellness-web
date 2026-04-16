@@ -9,7 +9,7 @@ function uid() { return Date.now() + '-' + Math.random().toString(36).slice(2) }
 
 export function useAffiliates(userId) {
   const [affiliates, setAffiliates] = useState([])
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading]       = useState(true)
 
   useEffect(() => {
     if (!isConfigured) {
@@ -24,13 +24,21 @@ export function useAffiliates(userId) {
       setAffiliates(data || [])
       setLoading(false)
     }
+
     loadAll()
+    const interval = setInterval(loadAll, 4000)
+    const onVisibility = () => { if (document.visibilityState === 'visible') loadAll() }
+    document.addEventListener('visibilitychange', onVisibility)
 
     const channel = supabase.channel('affiliates-' + userId)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'affiliates', filter: `user_id=eq.${userId}` }, loadAll)
       .subscribe()
 
-    return () => supabase.removeChannel(channel)
+    return () => {
+      clearInterval(interval)
+      document.removeEventListener('visibilitychange', onVisibility)
+      supabase.removeChannel(channel)
+    }
   }, [userId])
 
   const addAffiliate = useCallback(async (fields = {}) => {

@@ -23,13 +23,21 @@ export function useFormulas(userId) {
       setFormulas(data || [])
       setLoading(false)
     }
+
     loadAll()
+    const interval = setInterval(loadAll, 4000)
+    const onVisibility = () => { if (document.visibilityState === 'visible') loadAll() }
+    document.addEventListener('visibilitychange', onVisibility)
 
     const channel = supabase.channel('formulas-' + userId)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'formulas', filter: `user_id=eq.${userId}` }, loadAll)
       .subscribe()
 
-    return () => supabase.removeChannel(channel)
+    return () => {
+      clearInterval(interval)
+      document.removeEventListener('visibilitychange', onVisibility)
+      supabase.removeChannel(channel)
+    }
   }, [userId])
 
   const saveFormula = useCallback(async (formula) => {
