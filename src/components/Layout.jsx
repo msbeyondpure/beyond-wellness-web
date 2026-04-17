@@ -17,7 +17,7 @@ const EditorIcon = () => <svg width="22" height="22" viewBox="0 0 24 24" fill="n
 const MoreIcon = () => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>
 const CloseIcon = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
 
-const TABS = ['tasks', 'affiliates', 'formulas', 'editor', 'migrate']
+const TABS = ['tasks', 'affiliates', 'formulas', 'editor']
 const PRIMARY_TABS = [
   { id: 'tasks', label: 'Tasks', icon: <TasksIcon /> },
   { id: 'affiliates', label: 'Affiliates', icon: <AffiliatesIcon /> },
@@ -224,7 +224,7 @@ export default function Layout({ user, activeView, setActiveView, taskStats, chi
         ))}
         <button
           onClick={() => setShowMobileMore(true)}
-          className={activeView === 'migrate' ? 'active' : ''}
+          className=""
         >
           <MoreIcon />
         </button>
@@ -248,13 +248,6 @@ export default function Layout({ user, activeView, setActiveView, taskStats, chi
               </button>
             </div>
             <div className="p-3 space-y-1">
-              <button
-                onClick={() => switchView('migrate')}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded text-left transition-all ${activeView === 'migrate' ? 'bg-brand-accent/20 text-brand-accent' : 'text-gray-300 hover:bg-white/5 active:bg-white/10'}`}
-              >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-                <span className="text-sm font-medium">Migrate Desktop Data</span>
-              </button>
               {isConfigured && (
                 <button
                   onClick={() => { setShowMobileMore(false); supabase.auth.signOut() }}
