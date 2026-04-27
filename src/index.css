@@ -170,13 +170,13 @@ body { background: #1a1a1a; color: #e5e5e5; min-height: 100vh; }
 
 /* source editor */
 .source-editor {
-  width: 100%; min-height: 300px; max-height: 500px; padding: 12px;
+  width: 100%; min-height: unset; max-height: none; padding: 12px;
   background: #0d0d0d;
-  border: 1px solid rgba(196,94,44,0.1);
-  border-radius: 4px;
+  border: none;
+  border-radius: 0;
   color: #e5e7eb;
   font-family: 'Consolas','Monaco',monospace;
-  font-size: 13px;
+  font-size: 13px !important;
   line-height: 1.5;
   resize: vertical;
   outline: none;
@@ -250,12 +250,18 @@ body { background: #1a1a1a; color: #e5e5e5; min-height: 100vh; }
 ::-webkit-scrollbar-thumb { background: #3a3a3a; border-radius: 2px; }
 ::-webkit-scrollbar-thumb:hover { background: #555; }
 
+/* Hide scrollbar but keep scroll functionality */
+.scrollbar-hide { scrollbar-width: none; -ms-overflow-style: none; }
+.scrollbar-hide::-webkit-scrollbar { display: none; }
+
 /* === Mobile-specific overrides === */
 @media (max-width: 640px) {
   /* Prevent iOS auto-zoom on focus by ensuring inputs are >= 16px */
-  input, select, textarea, button {
+  input, select, textarea {
     font-size: 16px !important;
   }
+  /* Keep small text for editor toolbar selects — they don't trigger zoom since they're selects */
+  .editor-toolbar-select { font-size: 11px !important; }
   input.inline-edit-input { font-size: 14px !important; }
 
   /* Bigger nav icons on mobile (44px touch target) */
@@ -283,6 +289,7 @@ body { background: #1a1a1a; color: #e5e5e5; min-height: 100vh; }
   .nav-icon, .btn-primary, .btn-success, .btn-danger, button[role="tab"] {
     -webkit-tap-highlight-color: transparent;
     -webkit-touch-callout: none;
+    touch-action: manipulation;
   }
 }
 
@@ -290,7 +297,7 @@ body { background: #1a1a1a; color: #e5e5e5; min-height: 100vh; }
 .mobile-bottom-nav {
   position: fixed;
   bottom: 0; left: 0; right: 0;
-  height: 54px;
+  height: calc(54px + env(safe-area-inset-bottom, 0px));
   padding-bottom: env(safe-area-inset-bottom, 0);
   background: linear-gradient(180deg, rgba(26,26,26,0.92) 0%, rgba(17,17,17,0.98) 100%);
   border-top: 1px solid rgba(196,94,44,0.15);
@@ -313,6 +320,7 @@ body { background: #1a1a1a; color: #e5e5e5; min-height: 100vh; }
   padding: 0;
   min-height: 44px;
   -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 .mobile-bottom-nav button.active {
   color: #c45e2c;
@@ -336,7 +344,8 @@ body { background: #1a1a1a; color: #e5e5e5; min-height: 100vh; }
 }
 .drawer-panel {
   position: fixed;
-  top: 48px; bottom: 54px;
+  top: calc(48px + env(safe-area-inset-top, 0px));
+  bottom: calc(54px + env(safe-area-inset-bottom, 0px));
   left: 0;
   width: 85vw;
   max-width: 320px;
