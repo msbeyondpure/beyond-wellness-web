@@ -7,6 +7,22 @@ function lsGet(key, fallback) {
 function lsSet(key, val) { localStorage.setItem(key, JSON.stringify(val)) }
 function uid() { return Date.now() + '-' + Math.random().toString(36).slice(2) }
 
+function normalizeRestoredTask(task = {}) {
+  const restored = {
+    id: task.id || uid(),
+    category: task.category || 'Restored',
+    text: task.text || 'Restored task',
+    completed: Boolean(task.completed),
+    hidden: Boolean(task.hidden),
+    notes: task.notes || '',
+    sort_order: Number.isFinite(Number(task.sort_order)) ? Number(task.sort_order) : 0,
+    created_at: task.created_at || new Date().toISOString(),
+    completed_at: task.completed_at || null,
+  }
+  if (Array.isArray(task.files)) restored.files = task.files
+  return restored
+}
+
 export function useTasks(userId) {
   const [tasks, setTasks] = useState([])
   const [categoryOrder, setCategoryOrderState] = useState([])
@@ -16,6 +32,7 @@ export function useTasks(userId) {
   useEffect(() => {
     if (isConfigured) return
     setTasks(lsGet('bwTasks', []))
+    setCategoryOrderState(lsGet('bwCategoryOrder', []))
     setLoading(false)
   }, [])
 
@@ -85,11 +102,48 @@ export function useTasks(userId) {
     if (isConfigured) await supabase.from('tasks').delete().eq('id', id)
   }, [])
 
+  const restoreTask = useCallback(async (task) => {
+    const restored = normalizeRestoredTask(task)
+    if (!isConfigured) {
+      setTasks(prev => {
+        const exists = prev.some(t => t.id === restored.id)
+        const next = exists ? prev.map(t => t.id === restored.id ? restored : t) : [...prev, restored]
+        lsSet('bwTasks', next)
+        return next
+      })
+      return restored
+    }
+
+    const payload = { ...restored, user_id: userId }
+    let result = await supabase.from('tasks').upsert(payload, { onConflict: 'id' }).select().single()
+
+    if (result.error && Object.prototype.hasOwnProperty.call(payload, 'files')) {
+      const withoutFiles = { ...payload }
+      delete withoutFiles.files
+      result = await supabase.from('tasks').upsert(withoutFiles, { onConflict: 'id' }).select().single()
+    }
+
+    if (result.error) {
+      const withoutId = { ...payload }
+      delete withoutId.id
+      result = await supabase.from('tasks').insert(withoutId).select().single()
+    }
+
+    if (result.data) {
+      setTasks(prev => {
+        const exists = prev.some(t => t.id === result.data.id)
+        return exists ? prev.map(t => t.id === result.data.id ? result.data : t) : [...prev, result.data]
+      })
+      return result.data
+    }
+    return null
+  }, [userId])
+
   const setCategoryOrder = useCallback(async (order) => {
     setCategoryOrderState(order)
     if (!isConfigured) { lsSet('bwCategoryOrder', order); return }
     await supabase.from('category_order').upsert({ user_id: userId, order_list: order }, { onConflict: 'user_id' })
   }, [userId])
 
-  return { tasks, categoryOrder, setCategoryOrder, loading, addTask, updateTask, deleteTask }
+  return { tasks, categoryOrder, setCategoryOrder, loading, addTask, updateTask, deleteTask, restoreTask }
 }

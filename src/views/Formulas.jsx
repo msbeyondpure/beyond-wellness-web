@@ -1,9 +1,11 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+/* eslint-disable react/prop-types */
+import { useState, useRef, useEffect } from 'react'
 import { useFormulas } from '../hooks/useFormulas'
 
 const Plus = () => <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
 const Trash = () => <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
 const EditIcon = () => <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+const LinkIcon = () => <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
 
 function getRatioPreview(formula, targetIng, sourceId, sourceValue) {
   if (!targetIng.includeInRatio || targetIng.id === sourceId) return null
@@ -35,13 +37,38 @@ function fLoadStack(key) {
   try { return JSON.parse(localStorage.getItem(key)) || [] } catch { return [] }
 }
 function fSaveStack(key, arr) {
-  try { localStorage.setItem(key, JSON.stringify(arr)) } catch {}
+  try { localStorage.setItem(key, JSON.stringify(arr)) } catch { /* ignore storage failures */ }
+}
+function makeIngredient() {
+  return { id: crypto.randomUUID(), name: '', amount: '', cost: '', ratio: '', includeInRatio: true, link: '', notes: '' }
+}
+function normalizeIngredient(ing = {}) {
+  return {
+    id: ing.id || crypto.randomUUID(),
+    name: ing.name || '',
+    amount: ing.amount || '',
+    cost: ing.cost || '',
+    ratio: ing.ratio || '',
+    includeInRatio: ing.includeInRatio !== false,
+    link: ing.link || '',
+    notes: ing.notes || '',
+  }
+}
+function normalizeFormula(f) {
+  return {
+    ...f,
+    ingredients: Array.isArray(f.ingredients) ? f.ingredients.map(normalizeIngredient) : [],
+    target_cost: f.target_cost ?? f.targetCost ?? '',
+    target_margin: f.target_margin ?? f.targetMargin ?? '',
+    notes: f.notes || '',
+  }
 }
 function formulaSnapshot(f) {
-  return { name: f.name, ingredients: JSON.parse(JSON.stringify(f.ingredients || [])), target_cost: f.target_cost || '', target_margin: f.target_margin || '', notes: f.notes || '' }
+  const normalized = normalizeFormula(f)
+  return { name: normalized.name, ingredients: JSON.parse(JSON.stringify(normalized.ingredients || [])), target_cost: normalized.target_cost || '', target_margin: normalized.target_margin || '', notes: normalized.notes || '' }
 }
 
-export default function Formulas({ userId }) {
+export default function Formulas({ userId, resetKey }) {
   const { formulas, loading, saveFormula, deleteFormula, addFormula } = useFormulas(userId)
   const [activeId, setActiveId] = useState(null)
   const [showNew, setShowNew] = useState(false)
@@ -54,7 +81,11 @@ export default function Formulas({ userId }) {
   const [showImport, setShowImport] = useState(false)
   const [importText, setImportText] = useState('')
   const [importError, setImportError] = useState('')
-  const [historyVer, setHistoryVer] = useState(0)
+  const [, setHistoryVer] = useState(0)
+  const [selectedIngredientId, setSelectedIngredientId] = useState(null)
+
+  // reset when tab icon re-tapped
+  useEffect(() => { if (resetKey) { setActiveId(null); setShowNew(false); setNewName(''); setSelectedIngredientId(null) } }, [resetKey])
 
   // per-formula undo/redo stored in refs (keys = formula id)
   const undoRef   = useRef({})  // { [id]: snapshot[] }
@@ -62,10 +93,26 @@ export default function Formulas({ userId }) {
   // capture state BEFORE a mutation so we can push it as the undo checkpoint
   const preMutRef = useRef(null) // snapshot captured just before first onChange
   const preMutTimer = useRef(null)
+  const localFormulaRef = useRef(new Map())
+  const dirtyFormulaIdsRef = useRef(new Set())
 
   const [localFormulas, setLocalFormulas] = useState([])
   const [showMobileSidebar, setShowMobileSidebar] = useState(false)
-  useEffect(() => { setLocalFormulas(formulas) }, [formulas])
+  useEffect(() => {
+    const incoming = formulas.map(normalizeFormula)
+    setLocalFormulas(prev => {
+      const prevById = new Map(prev.map(f => [f.id, f]))
+      const incomingIds = new Set(incoming.map(f => f.id))
+      const merged = incoming.map(f => (
+        dirtyFormulaIdsRef.current.has(f.id) && prevById.has(f.id) ? prevById.get(f.id) : f
+      ))
+      prev.forEach(f => {
+        if (!incomingIds.has(f.id) && dirtyFormulaIdsRef.current.has(f.id)) merged.push(f)
+      })
+      localFormulaRef.current = new Map(merged.map(f => [f.id, f]))
+      return merged
+    })
+  }, [formulas])
   useEffect(() => { setEditingName(false) }, [activeId])
   // Auto-close mobile drawer when a formula is selected
   useEffect(() => { if (activeId) setShowMobileSidebar(false) }, [activeId])
@@ -79,6 +126,13 @@ export default function Formulas({ userId }) {
   }, [activeId])
 
   const active = localFormulas.find(f => f.id === activeId)
+  const selectedIngredient = active?.ingredients.find(ing => ing.id === selectedIngredientId)
+
+  useEffect(() => {
+    if (!active || !selectedIngredientId || !active.ingredients.some(ing => ing.id === selectedIngredientId)) {
+      setSelectedIngredientId(null)
+    }
+  }, [active, selectedIngredientId])
 
   const canFUndo = activeId && (undoRef.current[activeId]?.length > 0)
   const canFRedo = activeId && (redoRef.current[activeId]?.length > 0)
@@ -102,7 +156,7 @@ export default function Formulas({ userId }) {
           undoRef.current[id] = next
           redoRef.current[id] = []
           fSaveStack(F_UNDO_KEY(id), next)
-          try { localStorage.removeItem(F_REDO_KEY(id)) } catch {}
+          try { localStorage.removeItem(F_REDO_KEY(id)) } catch { /* ignore storage failures */ }
           setHistoryVer(v => v + 1)
         }
         preMutRef.current = null
@@ -166,21 +220,43 @@ export default function Formulas({ userId }) {
     return () => window.removeEventListener('keydown', fn)
   }) // no dep array — always reads latest refs / state
 
-  function updateLocal(id, updates) {
-    setLocalFormulas(prev => prev.map(f => f.id === id ? { ...f, ...updates } : f))
+  function setFormulaLocal(formula, markDirty = true) {
+    const normalized = normalizeFormula(formula)
+    if (markDirty) dirtyFormulaIdsRef.current.add(normalized.id)
+    localFormulaRef.current.set(normalized.id, normalized)
+    setLocalFormulas(prev => {
+      const exists = prev.some(f => f.id === normalized.id)
+      return exists ? prev.map(f => f.id === normalized.id ? normalized : f) : [...prev, normalized]
+    })
+    return normalized
+  }
+
+  function getLatestFormula(id) {
+    return localFormulaRef.current.get(id) || localFormulas.find(f => f.id === id)
+  }
+
+  function updateLocal(id, updates, markDirty = true) {
+    const formula = getLatestFormula(id)
+    if (!formula) return null
+    return setFormulaLocal({ ...formula, ...updates }, markDirty)
   }
 
   async function handleCreate() {
     if (!newName.trim()) return
     const f = await addFormula(newName.trim())
-    if (f) setActiveId(f.id)
+    if (f) {
+      const normalized = setFormulaLocal(normalizeFormula(f), false)
+      setActiveId(normalized.id)
+    }
     setNewName(''); setShowNew(false)
   }
 
   async function handleSave(formula, skipSnapshot = false) {
-    if (!skipSnapshot && formula.id) {
+    const latest = formula?.id ? (getLatestFormula(formula.id) || formula) : formula
+    const normalized = normalizeFormula(latest)
+    if (!skipSnapshot && normalized.id) {
       // Flush any pending pre-mutation snapshot before saving
-      if (preMutRef.current?.id === formula.id) {
+      if (preMutRef.current?.id === normalized.id) {
         clearTimeout(preMutTimer.current)
         const { id, snap } = preMutRef.current
         const stack = undoRef.current[id] || []
@@ -190,53 +266,65 @@ export default function Formulas({ userId }) {
           undoRef.current[id] = next
           redoRef.current[id] = []
           fSaveStack(F_UNDO_KEY(id), next)
-          try { localStorage.removeItem(F_REDO_KEY(id)) } catch {}
+          try { localStorage.removeItem(F_REDO_KEY(id)) } catch { /* ignore storage failures */ }
           setHistoryVer(v => v + 1)
         }
         preMutRef.current = null
       }
     }
-    await saveFormula({
-      id: formula.id,
-      name: formula.name,
-      ingredients: formula.ingredients,
-      targetCost: formula.target_cost || '',
-      targetMargin: formula.target_margin || '',
-      notes: formula.notes || '',
+    const saved = await saveFormula({
+      id: normalized.id,
+      name: normalized.name,
+      ingredients: normalized.ingredients,
+      targetCost: normalized.target_cost || '',
+      targetMargin: normalized.target_margin || '',
+      notes: normalized.notes || '',
     })
-    showToast('Saved')
+    if (saved) {
+      dirtyFormulaIdsRef.current.delete(normalized.id)
+      setFormulaLocal(normalizeFormula(saved), false)
+      showToast('Saved')
+    } else {
+      showToast('Save failed')
+    }
+  }
+
+  function saveFormulaById(formulaId) {
+    const formula = getLatestFormula(formulaId)
+    if (formula) handleSave(formula)
   }
 
   function addIngredient(formulaId) {
-    const formula = localFormulas.find(f => f.id === formulaId)
+    const formula = getLatestFormula(formulaId)
     if (!formula) return
     schedulePre(formula)
-    const newIng = { id: crypto.randomUUID(), name: '', amount: '', cost: '', ratio: '', includeInRatio: true }
+    const newIng = makeIngredient()
     const updated = { ...formula, ingredients: [...formula.ingredients, newIng] }
-    updateLocal(formulaId, { ingredients: updated.ingredients })
+    setFormulaLocal(updated)
     handleSave(updated)
   }
 
   function updateIngredient(formulaId, ingId, changes) {
-    const formula = localFormulas.find(f => f.id === formulaId)
+    const formula = getLatestFormula(formulaId)
     if (!formula) return
     schedulePre(formula)
-    const updated = { ...formula, ingredients: formula.ingredients.map(i => i.id === ingId ? { ...i, ...changes } : i) }
-    updateLocal(formulaId, { ingredients: updated.ingredients })
+    const updated = { ...formula, ingredients: formula.ingredients.map(i => i.id === ingId ? normalizeIngredient({ ...i, ...changes }) : i) }
+    setFormulaLocal(updated)
     return updated
   }
 
   function removeIngredient(formulaId, ingId) {
-    const formula = localFormulas.find(f => f.id === formulaId)
+    const formula = getLatestFormula(formulaId)
     if (!formula) return
     schedulePre(formula)
     const updated = { ...formula, ingredients: formula.ingredients.filter(i => i.id !== ingId) }
-    updateLocal(formulaId, { ingredients: updated.ingredients })
+    if (selectedIngredientId === ingId) setSelectedIngredientId(null)
+    setFormulaLocal(updated)
     handleSave(updated)
   }
 
   function saveIngredient(formulaId) {
-    const formula = localFormulas.find(f => f.id === formulaId)
+    const formula = getLatestFormula(formulaId)
     if (formula) handleSave(formula)
   }
 
@@ -244,7 +332,7 @@ export default function Formulas({ userId }) {
     if (nameDraft.trim() && active) {
       schedulePre(active)
       const updated = { ...active, name: nameDraft.trim() }
-      updateLocal(activeId, { name: nameDraft.trim() })
+      setFormulaLocal(updated)
       handleSave(updated)
     }
     setEditingName(false)
@@ -296,17 +384,25 @@ export default function Formulas({ userId }) {
       if (!line.trim() || line.includes('━') || line.toLowerCase().includes('example') || line.toLowerCase().includes('format')) return
       const parts = line.split('|').map(p => p.trim())
       if (!parts[0]) return
-      newIngs.push({ id: crypto.randomUUID(), name: parts[0], amount: parts[1] || '', cost: parts[2] || '', ratio: '', includeInRatio: true })
+      newIngs.push({ id: crypto.randomUUID(), name: parts[0], amount: parts[1] || '', cost: parts[2] || '', ratio: '', includeInRatio: true, link: parts[3] || '', notes: parts.slice(4).join(' | ') || '' })
     })
     if (!newIngs.length) { setImportError('No valid ingredients found.'); return }
     const updated = { ...active, ingredients: [...active.ingredients, ...newIngs] }
-    updateLocal(activeId, { ingredients: updated.ingredients })
+    setFormulaLocal(updated)
     handleSave(updated)
     setImportText(''); setImportError(''); setShowImport(false)
     showToast(`Imported ${newIngs.length} ingredient(s)`)
   }
 
-  const gridTemplate = `24px 1fr ${colWidths.amount}px ${colWidths.ratio}px ${colWidths.cost}px 28px`
+  function closeIngredientDetails() {
+    if (active) saveIngredient(active.id)
+    setSelectedIngredientId(null)
+  }
+
+  const ingredientMinWidth = 180
+  const actionColWidth = 64
+  const sheetMinWidth = 24 + ingredientMinWidth + colWidths.amount + colWidths.ratio + colWidths.cost + actionColWidth + 40
+  const gridTemplate = `24px minmax(${ingredientMinWidth}px, 1fr) ${colWidths.amount}px ${colWidths.ratio}px ${colWidths.cost}px ${actionColWidth}px`
 
   const ResizeHandle = ({ col }) => (
     <div
@@ -317,13 +413,13 @@ export default function Formulas({ userId }) {
   )
 
   if (loading) return (
-    <div className="p-4 pt-6 animate-fadeIn flex items-center justify-center h-[calc(100vh-160px)] sm:h-[calc(100vh-40px)]">
+    <div className="p-4 pt-6 animate-fadeIn flex items-center justify-center h-[calc(100dvh-160px)] sm:h-[calc(100dvh-40px)]">
       <span className="text-gray-600 text-sm">Loading formulas...</span>
     </div>
   )
 
   return (
-    <div className="p-3 pt-4 sm:p-4 sm:pt-6 animate-fadeIn h-[calc(100vh-136px)] sm:h-[calc(100vh-40px)]">
+    <div className="p-3 pt-4 sm:p-4 sm:pt-6 animate-fadeIn h-[calc(100dvh-136px)] sm:h-[calc(100dvh-40px)] min-h-[360px]">
       <Toast msg={toast} />
 
       {/* Import modal */}
@@ -335,12 +431,12 @@ export default function Formulas({ userId }) {
               <button onClick={() => setShowImport(false)} className="text-gray-500 hover:text-white text-lg leading-none">×</button>
             </div>
             <div className="p-4">
-              <p className="text-xs text-gray-500 mb-2">One per line: <code className="bg-black/30 px-1 rounded">Name | Amount | Cost</code></p>
+              <p className="text-xs text-gray-500 mb-2">One per line: <code className="bg-black/30 px-1 rounded">Name | Amount | Cost | Link | Notes</code></p>
               {importError && <div className="text-red-400 text-xs mb-2">{importError}</div>}
               <textarea
                 value={importText}
                 onChange={e => setImportText(e.target.value)}
-                placeholder={"Shea Butter | 100g | 5.00\nCoconut Oil | 50ml | 1.50"}
+                placeholder={"Shea Butter | 100g | 5.00 | https://... | Supplier notes\nCoconut Oil | 50ml | 1.50"}
                 rows={8}
                 className="w-full bg-brand-dark border border-white/10 rounded px-3 py-2 text-sm text-white placeholder-gray-600 outline-none focus:border-brand-accent/40 resize-none font-mono"
               />
@@ -353,7 +449,59 @@ export default function Formulas({ userId }) {
         </div>
       )}
 
-      <div className="flex gap-4 h-full">
+      {active && selectedIngredient && (
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={closeIngredientDetails}>
+          <div
+            className="glass-card rounded-t-2xl sm:rounded-lg w-full max-w-xl max-h-[88vh] flex flex-col animate-scaleIn pb-safe"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
+              <div className="min-w-0">
+                <h3 className="text-sm font-semibold text-white truncate">{selectedIngredient.name || 'Ingredient details'}</h3>
+                <p className="text-[11px] text-gray-600 mt-0.5">Link and notes</p>
+              </div>
+              <button onClick={closeIngredientDetails} className="nav-icon text-gray-500 hover:text-white" title="Close" aria-label="Close ingredient details">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
+            </div>
+            <div className="p-4 overflow-y-auto">
+              <label className="text-xs text-gray-500 block mb-1">Link</label>
+              <input
+                value={selectedIngredient.link || ''}
+                onChange={e => updateIngredient(active.id, selectedIngredient.id, { link: e.target.value })}
+                onBlur={() => saveIngredient(active.id)}
+                placeholder="https://supplier-or-reference-link"
+                className="w-full bg-brand-dark border border-white/10 rounded px-3 py-2 text-sm text-white placeholder-gray-600 outline-none focus:border-brand-accent/40"
+              />
+              {selectedIngredient.link && (
+                <a
+                  href={selectedIngredient.link}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 text-xs text-brand-accent hover:text-brand-accent-hover mt-2"
+                >
+                  <LinkIcon /> Open link
+                </a>
+              )}
+
+              <label className="text-xs text-gray-500 block mb-1 mt-4">Notes</label>
+              <textarea
+                value={selectedIngredient.notes || ''}
+                onChange={e => updateIngredient(active.id, selectedIngredient.id, { notes: e.target.value })}
+                onBlur={() => saveIngredient(active.id)}
+                placeholder="Ingredient supplier, substitutions, behavior, sourcing, or batch notes..."
+                rows={8}
+                className="w-full min-h-[180px] max-h-[55vh] bg-brand-dark border border-white/10 rounded px-3 py-2 text-sm text-gray-300 placeholder-gray-700 outline-none focus:border-brand-accent/40 resize-y"
+              />
+              <div className="flex justify-end mt-4">
+                <button onClick={closeIngredientDetails} className="btn-primary px-4 py-2 rounded text-sm">Save</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="flex gap-4 h-full min-w-0">
 
         {/* ── Mobile drawer backdrop ── */}
         {showMobileSidebar && (
@@ -412,8 +560,10 @@ export default function Formulas({ userId }) {
                   </button>
                   <button
                     onClick={e => { e.stopPropagation(); if (confirm('Delete this formula?')) { deleteFormula(f.id); if (activeId === f.id) setActiveId(null) } }}
-                    className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 p-2 text-red-400 hover:bg-white/10 rounded transition-all"
+                    className="absolute right-1 top-1/2 -translate-y-1/2 opacity-100 sm:opacity-0 group-hover:opacity-100 p-2 text-red-400 hover:bg-white/10 rounded transition-all"
                     style={{ touchAction: 'manipulation' }}
+                    title="Delete formula"
+                    aria-label={`Delete ${f.name}`}
                   >
                     <Trash />
                   </button>
@@ -424,7 +574,7 @@ export default function Formulas({ userId }) {
         </div>
 
         {/* ── Formula Editor ── */}
-        <div className="flex-1 min-w-0">
+        <div className="flex-1 min-w-0 h-full">
           {!active ? (
             <div className="glass-card rounded p-5 h-full flex flex-col items-center justify-center">
               <p className="text-gray-600 text-sm mb-4">
@@ -439,13 +589,14 @@ export default function Formulas({ userId }) {
               </button>
             </div>
           ) : (
-            <div className="glass-card rounded p-3 sm:p-5 h-full flex flex-col overflow-hidden">
+            <div className="glass-card rounded p-3 sm:p-5 h-full flex flex-col overflow-hidden min-w-0">
               {/* Header */}
-              <div className="flex items-center justify-between mb-3 sm:mb-4 pb-3 sm:pb-4 border-b border-white/10 shrink-0 gap-2">
+              <div className="flex flex-wrap sm:flex-nowrap items-center justify-between mb-3 sm:mb-4 pb-3 sm:pb-4 border-b border-white/10 shrink-0 gap-2 min-w-0">
                 <button
                   onClick={() => setShowMobileSidebar(true)}
                   className="sm:hidden nav-icon flex-shrink-0"
                   title="Show formulas"
+                  aria-label="Show formulas"
                 >
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
                 </button>
@@ -469,7 +620,7 @@ export default function Formulas({ userId }) {
                   </h2>
                 )}
 
-                <div className="flex gap-1 sm:gap-2 shrink-0 items-center">
+                <div className="flex gap-1 sm:gap-2 shrink-0 items-center overflow-x-auto scrollbar-hide max-w-full">
                   {/* Undo / Redo */}
                   <button
                     onClick={performFormulaUndo}
@@ -510,8 +661,8 @@ export default function Formulas({ userId }) {
               {/* Ingredient table — horizontal scroll on mobile */}
               <div className="flex-1 overflow-y-auto min-h-0">
                 {/* Scrollable grid area */}
-                <div className="overflow-x-auto" style={{ WebkitOverflowScrolling: 'touch' }}>
-                  <div style={{ minWidth: 480 }}>
+                <div className="overflow-x-auto pb-1 -mx-1 px-1" style={{ WebkitOverflowScrolling: 'touch' }}>
+                  <div style={{ minWidth: sheetMinWidth }}>
                     {/* Column headers */}
                     <div
                       style={{ display: 'grid', gridTemplateColumns: gridTemplate, columnGap: 8, marginBottom: 4, paddingRight: 4 }}
@@ -543,8 +694,12 @@ export default function Formulas({ userId }) {
                       return (
                         <div
                           key={ing.id}
-                          className="group"
-                          style={{ display: 'grid', gridTemplateColumns: gridTemplate, columnGap: 8, alignItems: 'center', paddingRight: 4, paddingTop: 3, paddingBottom: 3 }}
+                          className="group rounded hover:bg-white/[0.03] cursor-pointer transition-colors"
+                          onClick={e => {
+                            if (e.target.closest('input,button,textarea,a')) return
+                            setSelectedIngredientId(ing.id)
+                          }}
+                          style={{ display: 'grid', gridTemplateColumns: gridTemplate, columnGap: 8, alignItems: 'center', paddingRight: 4, paddingTop: 4, paddingBottom: 4, minHeight: 38 }}
                         >
                           {/* Ratio-include checkbox */}
                           <div className="flex items-center">
@@ -590,9 +745,9 @@ export default function Formulas({ userId }) {
                               onFocus={() => {
                                 if (!isSource) setRatioPreview({ sourceId: ing.id, sourceValue: ing.ratio || '' })
                               }}
-                              onBlur={() => {
+                              onBlur={e => {
                                 if (isSource) {
-                                  const updated = updateIngredient(active.id, ing.id, { ratio: ratioPreview.sourceValue })
+                                  const updated = updateIngredient(active.id, ing.id, { ratio: e.currentTarget.value })
                                   if (updated) handleSave(updated)
                                 }
                                 setRatioPreview({ sourceId: null, sourceValue: '' })
@@ -624,13 +779,23 @@ export default function Formulas({ userId }) {
                             style={{ minWidth: 0, width: '100%', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 3, padding: '3px 6px', color: '#e5e5e5', fontSize: 13, outline: 'none' }}
                           />
 
-                          {/* Remove */}
-                          <button
-                            onClick={() => removeIngredient(active.id, ing.id)}
-                            className="opacity-100 sm:opacity-0 group-hover:opacity-100 text-gray-600 hover:text-red-400 active:text-red-400 transition-all flex items-center justify-center"
-                          >
-                            <Trash />
-                          </button>
+                          {/* Actions */}
+                          <div className="flex items-center justify-end gap-1">
+                            <button
+                              onClick={() => setSelectedIngredientId(ing.id)}
+                              className={`p-1 rounded transition-all ${ing.link || ing.notes ? 'text-brand-accent bg-brand-accent/10' : 'text-gray-600 hover:text-gray-300 hover:bg-white/10'}`}
+                              title="Ingredient link and notes"
+                            >
+                              <LinkIcon />
+                            </button>
+                            <button
+                              onClick={() => removeIngredient(active.id, ing.id)}
+                              className="opacity-100 sm:opacity-0 group-hover:opacity-100 text-gray-600 hover:text-red-400 active:text-red-400 transition-all flex items-center justify-center p-1 rounded"
+                              title="Remove ingredient"
+                            >
+                              <Trash />
+                            </button>
+                          </div>
                         </div>
                       )
                     })}
@@ -652,13 +817,13 @@ export default function Formulas({ userId }) {
                         <span className="text-xs text-gray-600">Total Cost</span>
                         <span className="text-sm font-semibold text-brand-accent">${getTotalCost(active).toFixed(2)}</span>
                       </div>
-                      <div className="grid grid-cols-2 gap-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div>
                           <label className="text-xs text-gray-600 block mb-1">Target Cost ($)</label>
                           <input
                             value={active.target_cost || ''}
                             onChange={e => { schedulePre(active); updateLocal(active.id, { target_cost: e.target.value }) }}
-                            onBlur={() => handleSave(active)}
+                            onBlur={() => saveFormulaById(active.id)}
                             placeholder="0.00"
                             className="w-full bg-brand-dark border border-white/10 rounded px-2 py-1.5 text-sm text-white placeholder-gray-600 outline-none focus:border-brand-accent/40 transition-colors"
                           />
@@ -668,7 +833,7 @@ export default function Formulas({ userId }) {
                           <input
                             value={active.target_margin || ''}
                             onChange={e => { schedulePre(active); updateLocal(active.id, { target_margin: e.target.value }) }}
-                            onBlur={() => handleSave(active)}
+                            onBlur={() => saveFormulaById(active.id)}
                             placeholder="50"
                             className="w-full bg-brand-dark border border-white/10 rounded px-2 py-1.5 text-sm text-white placeholder-gray-600 outline-none focus:border-brand-accent/40 transition-colors"
                           />
@@ -683,7 +848,7 @@ export default function Formulas({ userId }) {
                           const profit = tc - tot
                           const margin = ((profit / tc) * 100).toFixed(1)
                           return (
-                            <div className="mt-2 flex gap-4 text-xs">
+                            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs">
                               <span className="text-gray-600">Profit: <span className={profit >= 0 ? 'text-brand-success' : 'text-red-400'}>${profit.toFixed(2)}</span></span>
                               <span className="text-gray-600">Actual margin: <span className={parseFloat(margin) >= tm ? 'text-brand-success' : 'text-red-400'}>{margin}%</span></span>
                             </div>
@@ -699,10 +864,10 @@ export default function Formulas({ userId }) {
                     <textarea
                       value={active.notes || ''}
                       onChange={e => { schedulePre(active); updateLocal(active.id, { notes: e.target.value }) }}
-                      onBlur={() => handleSave(active)}
+                      onBlur={() => saveFormulaById(active.id)}
                       placeholder="Formula notes..."
-                      rows={3}
-                      className="w-full bg-brand-dark border border-white/5 rounded px-3 py-2 text-sm text-gray-300 placeholder-gray-700 outline-none focus:border-brand-accent/30 resize-none transition-all"
+                      rows={6}
+                      className="w-full min-h-[140px] max-h-[65vh] bg-brand-dark border border-white/5 rounded px-3 py-2 text-sm text-gray-300 placeholder-gray-700 outline-none focus:border-brand-accent/30 resize-y transition-all"
                     />
                   </div>
                 </div>

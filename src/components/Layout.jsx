@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect } from 'react'
+/* eslint-disable react/prop-types */
+import { useState, useEffect } from 'react'
 import { supabase, isConfigured } from '../lib/supabase'
 
 const FolderIcon = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
@@ -13,17 +14,23 @@ const Trash2 = () => <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
 const TasksIcon = () => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
 const AffiliatesIcon = () => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
 const FormulasIcon = () => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10 2v7.31"/><path d="M14 9.3V1.99"/><path d="M8.5 2h7"/><path d="M14 9.3a6.5 6.5 0 1 1-4 0"/></svg>
+const SheetsIcon = () => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M3 15h18"/><path d="M9 3v18"/><path d="M15 3v18"/></svg>
 const EditorIcon = () => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
 const MoreIcon = () => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>
 const CloseIcon = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
 
-const TABS = ['tasks', 'affiliates', 'formulas', 'editor']
+const TABS = ['tasks', 'affiliates', 'formulas', 'sheets', 'editor']
 const PRIMARY_TABS = [
   { id: 'tasks', label: 'Tasks', icon: <TasksIcon /> },
   { id: 'affiliates', label: 'Affiliates', icon: <AffiliatesIcon /> },
   { id: 'formulas', label: 'Formulas', icon: <FormulasIcon /> },
+  { id: 'sheets', label: 'Sheets', icon: <SheetsIcon /> },
   { id: 'editor', label: 'Editor', icon: <EditorIcon /> },
 ]
+
+function loadTrashTasks() {
+  try { return JSON.parse(localStorage.getItem('bwTrashTasks')) || [] } catch { return [] }
+}
 
 export default function Layout({ user, activeView, setActiveView, taskStats, children }) {
   const [showFile, setShowFile] = useState(false)
@@ -33,9 +40,7 @@ export default function Layout({ user, activeView, setActiveView, taskStats, chi
   const [settings, setSettings] = useState(() => {
     try { return JSON.parse(localStorage.getItem('bwSettings')) || { fontSize: 'medium' } } catch { return { fontSize: 'medium' } }
   })
-  const [trash, setTrash] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('bwTrashTasks')) || [] } catch { return [] }
-  })
+  const [trash, setTrash] = useState(loadTrashTasks)
 
   useEffect(() => {
     const close = (e) => {
@@ -51,6 +56,16 @@ export default function Layout({ user, activeView, setActiveView, taskStats, chi
     localStorage.setItem('bwSettings', JSON.stringify(settings))
   }, [settings])
 
+  useEffect(() => {
+    const refreshTrash = () => setTrash(loadTrashTasks())
+    window.addEventListener('trash-updated', refreshTrash)
+    window.addEventListener('storage', refreshTrash)
+    return () => {
+      window.removeEventListener('trash-updated', refreshTrash)
+      window.removeEventListener('storage', refreshTrash)
+    }
+  }, [])
+
   // Lock body scroll when mobile More sheet is open
   useEffect(() => {
     document.body.style.overflow = showMobileMore ? 'hidden' : ''
@@ -58,6 +73,12 @@ export default function Layout({ user, activeView, setActiveView, taskStats, chi
   }, [showMobileMore])
 
   const trashCount = trash.length
+
+  const commitTrash = (next) => {
+    localStorage.setItem('bwTrashTasks', JSON.stringify(next))
+    setTrash(next)
+    window.dispatchEvent(new CustomEvent('trash-updated'))
+  }
 
   const switchView = (v) => {
     setActiveView(v)
@@ -79,7 +100,7 @@ export default function Layout({ user, activeView, setActiveView, taskStats, chi
 
               {/* File menu */}
               <div className="relative menu-keep">
-                <button onClick={e => { e.stopPropagation(); setShowFile(v => !v); setShowSettings(false); setShowTrash(false) }} className="nav-icon" title="File">
+                <button onClick={e => { e.stopPropagation(); setShowFile(v => !v); setShowSettings(false); setShowTrash(false) }} className="nav-icon" title="File" aria-label="File menu">
                   <FolderIcon />
                 </button>
                 {showFile && (
@@ -96,7 +117,7 @@ export default function Layout({ user, activeView, setActiveView, taskStats, chi
 
               {/* Settings menu */}
               <div className="relative menu-keep">
-                <button onClick={e => { e.stopPropagation(); setShowSettings(v => !v); setShowFile(false); setShowTrash(false) }} className="nav-icon" title="Settings">
+                <button onClick={e => { e.stopPropagation(); setShowSettings(v => !v); setShowFile(false); setShowTrash(false) }} className="nav-icon" title="Settings" aria-label="Settings menu">
                   <SettingsIcon />
                 </button>
                 {showSettings && (
@@ -133,7 +154,7 @@ export default function Layout({ user, activeView, setActiveView, taskStats, chi
 
               {/* Trash menu */}
               <div className="relative menu-keep">
-                <button onClick={e => { e.stopPropagation(); setShowTrash(v => !v); setShowFile(false); setShowSettings(false) }} className="nav-icon relative" title="Recycle Bin">
+                <button onClick={e => { e.stopPropagation(); setShowTrash(v => !v); setShowFile(false); setShowSettings(false) }} className="nav-icon relative" title="Recycle Bin" aria-label="Recycle Bin">
                   <TrashBin />
                   {trashCount > 0 && (
                     <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-red-500 rounded-full text-[10px] flex items-center justify-center text-white">{trashCount}</span>
@@ -144,7 +165,7 @@ export default function Layout({ user, activeView, setActiveView, taskStats, chi
                     <div className="flex items-center justify-between mb-2">
                       <h4 className="text-white font-medium text-sm">Recycle Bin</h4>
                       {trashCount > 0 && (
-                        <button onClick={() => { setTrash([]); localStorage.setItem('bwTrashTasks', '[]') }} className="text-xs text-red-400 hover:text-red-300 flex items-center gap-1">
+                        <button onClick={() => commitTrash([])} className="text-xs text-red-400 hover:text-red-300 flex items-center gap-1">
                           <Trash2 /> Clear All
                         </button>
                       )}
@@ -159,8 +180,8 @@ export default function Layout({ user, activeView, setActiveView, taskStats, chi
                             <span className="text-gray-300 truncate flex-1">{item.text} <span className="text-gray-500">({item.category})</span></span>
                             <button onClick={() => {
                               window.dispatchEvent(new CustomEvent('restore-task', { detail: item }))
-                              setTrash(prev => { const next = prev.filter((_, j) => j !== i); localStorage.setItem('bwTrashTasks', JSON.stringify(next)); return next })
-                            }} className="text-brand-accent hover:text-white ml-2 p-1" title="Restore">
+                              commitTrash(trash.filter((_, j) => j !== i))
+                            }} className="text-brand-accent hover:text-white ml-2 p-1" title="Restore" aria-label="Restore task">
                               <RotateCcw />
                             </button>
                           </div>
@@ -207,7 +228,7 @@ export default function Layout({ user, activeView, setActiveView, taskStats, chi
       </nav>
 
       {/* === Page content (with bottom-nav padding on mobile) === */}
-      <div className={`${settings.fontSize === 'small' ? 'text-sm' : settings.fontSize === 'large' ? 'text-lg' : 'text-base'} pb-16 sm:pb-0`}>
+      <div className={`${settings.fontSize === 'small' ? 'text-sm' : settings.fontSize === 'large' ? 'text-lg' : 'text-base'} pb-[calc(4rem+env(safe-area-inset-bottom,0px))] sm:pb-0`}>
         {children}
       </div>
 
@@ -218,6 +239,9 @@ export default function Layout({ user, activeView, setActiveView, taskStats, chi
             key={t.id}
             onClick={() => switchView(t.id)}
             className={activeView === t.id ? 'active' : ''}
+            title={t.label}
+            aria-label={t.label}
+            aria-current={activeView === t.id ? 'page' : undefined}
           >
             {t.icon}
           </button>
@@ -225,6 +249,8 @@ export default function Layout({ user, activeView, setActiveView, taskStats, chi
         <button
           onClick={() => setShowMobileMore(true)}
           className=""
+          title="More"
+          aria-label="More"
         >
           <MoreIcon />
         </button>
@@ -243,7 +269,7 @@ export default function Layout({ user, activeView, setActiveView, taskStats, chi
           >
             <div className="flex items-center justify-between px-5 py-4 border-b border-white/5">
               <h3 className="text-white font-semibold text-base">More</h3>
-              <button onClick={() => setShowMobileMore(false)} className="nav-icon">
+              <button onClick={() => setShowMobileMore(false)} className="nav-icon" title="Close" aria-label="Close menu">
                 <CloseIcon />
               </button>
             </div>

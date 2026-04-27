@@ -33,8 +33,7 @@ export default function Auth() {
       <div className="w-full max-w-sm">
         {/* Logo / Title */}
         <div className="text-center mb-8">
-          <h1 className="text-2xl font-semibold text-white tracking-tight">Requiem</h1>
-          <p className="text-gray-500 text-sm mt-1">Beyond Wellness Tracker</p>
+          <h1 style={{ fontFamily: "'Albert Sans', Arial, sans-serif", letterSpacing: '0.14em' }} className="text-3xl font-bold text-white uppercase">Beyond Wellness</h1>
         </div>
 
         {/* Card */}
@@ -69,6 +68,7 @@ export default function Auth() {
                 value={email}
                 onChange={e => setEmail(e.target.value)}
                 required
+                autoComplete="email"
                 className="w-full bg-brand-dark border border-white/10 rounded px-3 py-2 text-sm text-white placeholder-gray-600 outline-none focus:border-brand-accent/50 focus:ring-1 focus:ring-brand-accent/20 transition-all"
                 placeholder="you@example.com"
               />
@@ -82,6 +82,7 @@ export default function Auth() {
                 onChange={e => setPassword(e.target.value)}
                 required
                 minLength={6}
+                autoComplete={tab === 'signin' ? 'current-password' : 'new-password'}
                 className="w-full bg-brand-dark border border-white/10 rounded px-3 py-2 text-sm text-white placeholder-gray-600 outline-none focus:border-brand-accent/50 focus:ring-1 focus:ring-brand-accent/20 transition-all"
                 placeholder="••••••••"
               />

@@ -1,3 +1,4 @@
+/* eslint-disable react/prop-types */
 import { useState, useMemo, useEffect } from 'react'
 import { useAffiliates } from '../hooks/useAffiliates'
 import { useOutreach } from '../hooks/useOutreach'
@@ -71,7 +72,7 @@ function Modal({ isOpen, onClose, title, children }) {
   )
 }
 
-export default function Affiliates({ userId }) {
+export default function Affiliates({ userId, resetKey }) {
   const [tab, setTab] = useState('outreach')
   const { affiliates, loading: aLoading, addAffiliate, updateAffiliate, deleteAffiliate } = useAffiliates(userId)
   const { contacts, loading: oLoading, addContact, updateContact, deleteContact } = useOutreach(userId)
@@ -89,6 +90,15 @@ export default function Affiliates({ userId }) {
   const [editingAffiliateId, setEditingAffiliateId] = useState(null)
   const [selectedAffiliate, setSelectedAffiliate] = useState(null)
   const [inlineEdit, setInlineEdit] = useState(null) // { id, field, value }
+
+  // reset when tab icon re-tapped
+  useEffect(() => {
+    if (resetKey) {
+      setShowOutreachForm(false); setEditingOutreachId(null); setOutreachForm(emptyOutreach)
+      setShowAffiliateForm(false); setEditingAffiliateId(null); setAffiliateForm(emptyAffiliate)
+      setSelectedAffiliate(null); setInlineEdit(null)
+    }
+  }, [resetKey])
 
   const sortedOutreach = useMemo(() => sortData(contacts, outreachSort), [contacts, outreachSort])
   const sortedAffiliates = useMemo(() => sortData(affiliates, affiliateSort), [affiliates, affiliateSort])

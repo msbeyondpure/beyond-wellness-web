@@ -1,4 +1,5 @@
-import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
+/* eslint-disable react/prop-types */
+import { useState, useRef, useEffect, useMemo } from 'react'
 import { useTasks } from '../hooks/useTasks'
 import { useNotepad } from '../hooks/useNotepad'
 
@@ -9,9 +10,6 @@ const Trash2 = ({size=14}) => <svg width={size} height={size} viewBox="0 0 24 24
 const CheckCircle = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
 const GripV = () => <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="9" cy="6" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="18" r="1.5"/></svg>
 const ChevronRight = () => <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="9 18 15 12 9 6"/></svg>
-const Upload = ({size=18}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-const Eye = () => <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-const SendIcon = () => <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
 const CollapseLeft = () => <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 18 9 12 15 6"/></svg>
 
 function playSound(type) {
@@ -32,11 +30,13 @@ function playSound(type) {
       gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3)
       osc.start(); osc.stop(ctx.currentTime + 0.3)
     }
-  } catch {}
+  } catch {
+    // Audio feedback is optional.
+  }
 }
 
-export default function Tasks({ userId, onStatsChange }) {
-  const { tasks, loading, addTask, updateTask, deleteTask, categoryOrder, setCategoryOrder } = useTasks(userId)
+export default function Tasks({ userId, onStatsChange, resetKey }) {
+  const { tasks, loading, addTask, updateTask, deleteTask, restoreTask, categoryOrder, setCategoryOrder } = useTasks(userId)
   const { content: notepadContent, updateContent } = useNotepad(userId)
 
   const [expandedTask, setExpandedTask] = useState(null)
@@ -51,7 +51,6 @@ export default function Tasks({ userId, onStatsChange }) {
   const [checkAnimating, setCheckAnimating] = useState(null)
   const [sendingComplete, setSendingComplete] = useState(null)
   const [showCompleted, setShowCompleted] = useState(false)
-  const [dragOver, setDragOver] = useState(null)
   const [dragTaskId, setDragTaskId] = useState(null)
   const [dragOverTaskId, setDragOverTaskId] = useState(null)
   const [dragSectionCat, setDragSectionCat] = useState(null)
@@ -88,6 +87,14 @@ export default function Tasks({ userId, onStatsChange }) {
     }
   }, [tasks, onStatsChange])
 
+  // reset when tab icon re-tapped
+  useEffect(() => {
+    if (resetKey) {
+      setExpandedTask(null); setShowNewTaskForm(null); setNewTaskText('')
+      setShowNewCategoryForm(false); setNewCategoryName(''); setShowCompleted(false)
+    }
+  }, [resetKey])
+
   // Persist collapsed sections
   useEffect(() => {
     localStorage.setItem('bwCollapsed', JSON.stringify(collapsedSections))
@@ -96,11 +103,11 @@ export default function Tasks({ userId, onStatsChange }) {
   // Listen for trash restore events from Layout
   useEffect(() => {
     const handler = (e) => {
-      addTask(e.detail.category, e.detail.text)
+      restoreTask(e.detail)
     }
     window.addEventListener('restore-task', handler)
     return () => window.removeEventListener('restore-task', handler)
-  }, [addTask])
+  }, [restoreTask])
 
   const toggleTask = (id, e) => {
     e?.stopPropagation()
@@ -140,7 +147,7 @@ export default function Tasks({ userId, onStatsChange }) {
     }
   }
 
-  const handleDeleteTask = (id, cat) => {
+  const handleDeleteTask = (id) => {
     const task = tasks.find(t => t.id === id)
     if (!task) return
     // add to trash
@@ -515,7 +522,7 @@ export default function Tasks({ userId, onStatsChange }) {
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
                 Notepad
               </h3>
-              <button onClick={() => setShowMobileNotepad(false)} className="nav-icon">
+              <button onClick={() => setShowMobileNotepad(false)} className="nav-icon" title="Close notepad" aria-label="Close notepad">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
               </button>
             </div>

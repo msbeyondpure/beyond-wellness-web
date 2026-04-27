@@ -10,6 +10,11 @@ const loadLocalFile = (p) => localStorage.getItem(LS_FILE(p)) || ''
 const saveLocalFile = (p, c) => localStorage.setItem(LS_FILE(p), c)
 const deleteLocalFile = (p) => localStorage.removeItem(LS_FILE(p))
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2)
+const withoutContent = (node) => {
+  const next = { ...node }
+  delete next.content
+  return next
+}
 
 // ── hook ─────────────────────────────────────────────────────────────────────
 export function useEditorFiles(userId) {
@@ -46,7 +51,7 @@ export function useEditorFiles(userId) {
       document.removeEventListener('visibilitychange', onVisibility)
       supabase.removeChannel(channel)
     }
-  }, [userId])
+  }, [userId, useDB])
 
   // ── Create ────────────────────────────────────────────────────────────────
   async function createNode(name, type, parentPath = '') {
@@ -59,7 +64,7 @@ export function useEditorFiles(userId) {
       const node = { id: uid(), name: trimmed, path, type, parent_path: parentPath, content: '' }
       const next = [...files, node]
       setFiles(next)
-      saveLocalTree(next.map(({ content, ...n }) => n))
+      saveLocalTree(next.map(withoutContent))
       if (type === 'file') saveLocalFile(path, '')
       return node
     }
@@ -88,7 +93,7 @@ export function useEditorFiles(userId) {
     if (!useDB) {
       toDelete.forEach(f => { if (f.type === 'file') deleteLocalFile(f.path) })
       const next = files.filter(f => !paths.has(f.path))
-      setFiles(next); saveLocalTree(next.map(({ content, ...n }) => n))
+      setFiles(next); saveLocalTree(next.map(withoutContent))
       return
     }
     await supabase.from('editor_files').delete().eq('user_id', userId).in('path', [...paths])
@@ -117,7 +122,7 @@ export function useEditorFiles(userId) {
         const isRoot = f.path === path
         return { ...f, path: np, name: isRoot ? newName.trim() : f.name, parent_path: isRoot ? node.parent_path : (remap[f.parent_path] || f.parent_path) }
       })
-      setFiles(next); saveLocalTree(next.map(({ content, ...n }) => n))
+      setFiles(next); saveLocalTree(next.map(withoutContent))
       return { ...node, path: newPath, name: newName.trim() }
     }
 
