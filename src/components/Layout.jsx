@@ -32,7 +32,7 @@ function loadTrashTasks() {
   try { return JSON.parse(localStorage.getItem('bwTrashTasks')) || [] } catch { return [] }
 }
 
-export default function Layout({ user, activeView, setActiveView, taskStats, children }) {
+export default function Layout({ user, activeView, setActiveView, taskStats, onUndo, onRedo, children }) {
   const [showFile, setShowFile] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [showTrash, setShowTrash] = useState(false)
@@ -105,11 +105,11 @@ export default function Layout({ user, activeView, setActiveView, taskStats, chi
                 </button>
                 {showFile && (
                   <div className="absolute top-full left-0 mt-1 menu-dropdown rounded py-1 min-w-44 animate-fadeIn z-50">
-                    <button onClick={() => setShowFile(false)} className="w-full text-left px-3 py-2 text-gray-300 hover:bg-white/10 flex items-center gap-2 text-sm">
-                      <UndoIcon /> Undo
+                    <button onClick={() => { onUndo?.(); setShowFile(false) }} className="w-full text-left px-3 py-2 text-gray-300 hover:bg-white/10 flex items-center gap-2 text-sm">
+                      <UndoIcon /> Undo <span className="ml-auto text-gray-600 text-[11px]">Ctrl+Z</span>
                     </button>
-                    <button onClick={() => setShowFile(false)} className="w-full text-left px-3 py-2 text-gray-300 hover:bg-white/10 flex items-center gap-2 text-sm">
-                      <RedoIcon /> Redo
+                    <button onClick={() => { onRedo?.(); setShowFile(false) }} className="w-full text-left px-3 py-2 text-gray-300 hover:bg-white/10 flex items-center gap-2 text-sm">
+                      <RedoIcon /> Redo <span className="ml-auto text-gray-600 text-[11px]">Ctrl+Shift+Z</span>
                     </button>
                   </div>
                 )}

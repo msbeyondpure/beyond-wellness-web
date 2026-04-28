@@ -5,6 +5,62 @@ const LS_KEY = 'bwSheets'
 const LS_CORE_SEEDED_KEY = 'bwSheetsCoreSeeded'
 
 export const BATCH_PRODUCTION_PRODUCTS = ['Deodorant', 'Moisturizer', 'Body Oil', 'Lip Balm']
+export const MASTER_SOURCING_SHEET_NAME = 'Master Sourcing Sheet'
+export const LEGACY_INVENTORY_SHEET_NAME = 'Inventory Sheet'
+
+export const MASTER_SOURCING_COLUMNS = [
+  'Ingredient',
+  'IN STOCK',
+  'Function',
+  'Preferred Source',
+  'Preferred Link',
+  'Backup Source',
+  'Backup Link',
+  'MOQ',
+  'Unit Price',
+  'Price Break',
+  'Shipping Cost',
+  'Lead Time',
+  'Certs / COA',
+  'Compliance Notes',
+  'Last Quote',
+  'Status',
+  'Inventory Category',
+  'SKU / Lot',
+  'Location',
+  'On Hand',
+  'Unit',
+  'Allocated',
+  'Available',
+  'Reorder Point',
+  'Reorder Qty',
+  'Supplier Lead Time',
+  'Last Count Date',
+  'Expiry / Retest Date',
+  'COA On File',
+  'Reorder Status',
+  'Notes',
+]
+
+const LEGACY_INVENTORY_COLUMNS = [
+  'Item Type',
+  'Item Name',
+  'SKU / Lot',
+  'Location',
+  'On Hand',
+  'Unit',
+  'Allocated',
+  'Available',
+  'Reorder Point',
+  'Reorder Qty',
+  'Preferred Supplier',
+  'Supplier Lead Time',
+  'Last Count Date',
+  'Expiry / Retest Date',
+  'COA On File',
+  'Reorder Status',
+  'Notes',
+]
 
 export const BATCH_PRODUCTION_STEPS = [
   { 'Ingredient / Step': 'Weigh phase A ingredients', 'Step Order': '1', 'Release Status': 'Pending' },
@@ -17,32 +73,19 @@ export const BATCH_PRODUCTION_STEPS = [
 export const BEYOND_WELLNESS_SHEET_TEMPLATES = [
   {
     key: 'master-sourcing',
-    name: 'Master Sourcing Sheet',
-    columns: [
-      'Ingredient',
-      'INCI / Spec',
-      'Function',
-      'Preferred Source',
-      'Preferred Link',
-      'Backup Source',
-      'Backup Link',
-      'MOQ',
-      'Unit Price',
-      'Price Break',
-      'Shipping Cost',
-      'Lead Time',
-      'Certs / COA',
-      'Compliance Notes',
-      'Last Quote',
-      'Status',
-      'Notes',
-    ],
+    name: MASTER_SOURCING_SHEET_NAME,
+    columns: MASTER_SOURCING_COLUMNS,
     rows: [
       { Function: 'Active / hero ingredient', Status: 'Needs source' },
       { Function: 'Base / carrier', Status: 'Needs source' },
       { Function: 'Preservative / stabilizer', Status: 'Needs source' },
       { Function: 'Fragrance / sensory', Status: 'Needs source' },
       { Function: 'Backup-only ingredient', Status: 'Needs source' },
+      { 'Inventory Category': 'Ingredient', 'Reorder Status': 'Watch' },
+      { 'Inventory Category': 'Jar / container', 'Reorder Status': 'Watch' },
+      { 'Inventory Category': 'Lid / closure', 'Reorder Status': 'Watch' },
+      { 'Inventory Category': 'Label / printed item', 'Reorder Status': 'Watch' },
+      { 'Inventory Category': 'Shipping material', 'Reorder Status': 'Watch' },
     ],
   },
   {
@@ -135,37 +178,6 @@ export const BEYOND_WELLNESS_SHEET_TEMPLATES = [
       BATCH_PRODUCTION_STEPS.map(step => ({ Product: product, ...step }))
     )),
   },
-  {
-    key: 'inventory',
-    name: 'Inventory Sheet',
-    columns: [
-      'Item Type',
-      'Item Name',
-      'SKU / Lot',
-      'Location',
-      'On Hand',
-      'Unit',
-      'Allocated',
-      'Available',
-      'Reorder Point',
-      'Reorder Qty',
-      'Preferred Supplier',
-      'Supplier Lead Time',
-      'Last Count Date',
-      'Expiry / Retest Date',
-      'COA On File',
-      'Reorder Status',
-      'Notes',
-    ],
-    rows: [
-      { 'Item Type': 'Ingredient', 'Reorder Status': 'Watch' },
-      { 'Item Type': 'Ingredient', 'Reorder Status': 'Watch' },
-      { 'Item Type': 'Jar / container', 'Reorder Status': 'Watch' },
-      { 'Item Type': 'Lid / closure', 'Reorder Status': 'Watch' },
-      { 'Item Type': 'Label / printed item', 'Reorder Status': 'Watch' },
-      { 'Item Type': 'Shipping material', 'Reorder Status': 'Watch' },
-    ],
-  },
 ]
 
 function uid() {
@@ -180,17 +192,123 @@ function lsSet(sheets) {
   localStorage.setItem(LS_KEY, JSON.stringify(sheets))
 }
 
+function valuesByColumnName(sheet, row) {
+  return Object.fromEntries((sheet.columns || []).map(col => [col.name, row.cells?.[col.id] || '']))
+}
+
+function hasNamedRowContent(values) {
+  return Object.values(values).some(value => String(value || '').trim())
+}
+
+function truthyStock(value) {
+  const normalized = String(value || '').trim().toLowerCase()
+  return ['true', 'yes', 'y', '1', 'checked', 'in stock', 'stocked'].includes(normalized)
+}
+
+function stockFromInventory(values) {
+  const available = parseFloat(values.Available || values['On Hand'] || '')
+  if (Number.isFinite(available) && available > 0) return 'TRUE'
+  if (truthyStock(values['IN STOCK'])) return 'TRUE'
+  return ''
+}
+
+function mergeValue(current, next) {
+  return String(current || '').trim() ? current : (next || '')
+}
+
+function mappedInventoryValues(values) {
+  return {
+    Ingredient: values['Item Name'] || values.Ingredient || values.Component || '',
+    'Inventory Category': values['Item Type'] || values['Inventory Category'] || '',
+    'SKU / Lot': values['SKU / Lot'] || '',
+    Location: values.Location || '',
+    'On Hand': values['On Hand'] || '',
+    Unit: values.Unit || '',
+    Allocated: values.Allocated || '',
+    Available: values.Available || '',
+    'Reorder Point': values['Reorder Point'] || '',
+    'Reorder Qty': values['Reorder Qty'] || '',
+    'Preferred Source': values['Preferred Supplier'] || values['Preferred Source'] || '',
+    'Supplier Lead Time': values['Supplier Lead Time'] || '',
+    'Lead Time': values['Supplier Lead Time'] || values['Lead Time'] || '',
+    'COA On File': values['COA On File'] || '',
+    'Certs / COA': values['COA On File'] || values['Certs / COA'] || '',
+    'Last Count Date': values['Last Count Date'] || '',
+    'Expiry / Retest Date': values['Expiry / Retest Date'] || '',
+    'Reorder Status': values['Reorder Status'] || '',
+    Status: values['Reorder Status'] || values.Status || '',
+    'IN STOCK': stockFromInventory(values),
+    Notes: values.Notes || '',
+  }
+}
+
+function masterRowIndexForInventory(master, masterRows, mapped) {
+  const ingredientColumn = master.columns.find(col => col.name === 'Ingredient')
+  const categoryColumn = master.columns.find(col => col.name === 'Inventory Category')
+  const ingredient = String(mapped.Ingredient || '').trim().toLowerCase()
+  if (ingredient && ingredientColumn) {
+    return masterRows.findIndex(row => String(row.cells?.[ingredientColumn.id] || '').trim().toLowerCase() === ingredient)
+  }
+
+  const category = String(mapped['Inventory Category'] || '').trim().toLowerCase()
+  if (!category || !categoryColumn) return -1
+  return masterRows.findIndex(row => (
+    !String(row.cells?.[ingredientColumn?.id] || '').trim() &&
+    String(row.cells?.[categoryColumn.id] || '').trim().toLowerCase() === category
+  ))
+}
+
+function mergeInventoryIntoMasterSheets(inputSheets) {
+  const normalized = inputSheets.map(normalizeSheet)
+  const inventorySheets = normalized.filter(sheet => sheet.name === LEGACY_INVENTORY_SHEET_NAME)
+  if (!inventorySheets.length) {
+    return normalized.filter(sheet => sheet.name !== LEGACY_INVENTORY_SHEET_NAME)
+  }
+
+  const remaining = normalized.filter(sheet => sheet.name !== LEGACY_INVENTORY_SHEET_NAME)
+  let master = remaining.find(sheet => sheet.name === MASTER_SOURCING_SHEET_NAME)
+  if (!master) master = makeTemplateSheet(BEYOND_WELLNESS_SHEET_TEMPLATES.find(template => template.name === MASTER_SOURCING_SHEET_NAME))
+  master = normalizeSheet(master)
+
+  const masterRows = [...master.rows]
+
+  inventorySheets.forEach(sheet => {
+    sheet.rows.forEach(row => {
+      const values = valuesByColumnName(sheet, row)
+      if (!hasNamedRowContent(values)) return
+      const mapped = mappedInventoryValues(values)
+      const targetIndex = masterRowIndexForInventory(master, masterRows, mapped)
+
+      if (targetIndex >= 0) {
+        const cells = { ...masterRows[targetIndex].cells }
+        master.columns.forEach(col => {
+          cells[col.id] = mergeValue(cells[col.id], mapped[col.name])
+        })
+        masterRows[targetIndex] = { ...masterRows[targetIndex], cells }
+      } else {
+        masterRows.push(rowFromNamedValues(master.columns, mapped))
+      }
+    })
+  })
+
+  const mergedMaster = normalizeSheet({ ...master, rows: masterRows })
+  const hasMaster = remaining.some(sheet => sheet.id === mergedMaster.id)
+  return hasMaster
+    ? remaining.map(sheet => sheet.id === mergedMaster.id ? mergedMaster : sheet)
+    : [mergedMaster, ...remaining]
+}
+
 function seedCoreSheets() {
   return BEYOND_WELLNESS_SHEET_TEMPLATES.map(makeTemplateSheet)
 }
 
 function lsGetWithSeed() {
   const existing = lsGet()
-  if (existing.length || localStorage.getItem(LS_CORE_SEEDED_KEY) === '1') return existing.map(normalizeSheet)
+  if (existing.length || localStorage.getItem(LS_CORE_SEEDED_KEY) === '1') return mergeInventoryIntoMasterSheets(existing)
   const seeded = seedCoreSheets()
   lsSet(seeded)
   localStorage.setItem(LS_CORE_SEEDED_KEY, '1')
-  return seeded
+  return mergeInventoryIntoMasterSheets(seeded)
 }
 
 function defaultColumns() {
@@ -219,8 +337,22 @@ function rowFromNamedValues(columns, values = {}) {
 }
 
 function normalizeSheet(sheet) {
-  const columns = Array.isArray(sheet.columns) && sheet.columns.length ? sheet.columns : defaultColumns()
+  let columns = Array.isArray(sheet.columns) && sheet.columns.length ? sheet.columns : defaultColumns()
+  if (sheet.name === MASTER_SOURCING_SHEET_NAME) {
+    const existing = new Set(columns.map(col => col.name))
+    const missing = MASTER_SOURCING_COLUMNS
+      .filter(name => !existing.has(name))
+      .map(name => ({ id: uid(), name }))
+    columns = [...columns, ...missing]
+  } else if (sheet.name === LEGACY_INVENTORY_SHEET_NAME) {
+    const existing = new Set(columns.map(col => col.name))
+    const missing = LEGACY_INVENTORY_COLUMNS
+      .filter(name => !existing.has(name))
+      .map(name => ({ id: uid(), name }))
+    columns = [...columns, ...missing]
+  }
   const rows = Array.isArray(sheet.rows) ? sheet.rows : []
+  const storedWrap = columns.find(col => typeof col.sheetWrap === 'boolean')?.sheetWrap
   return {
     id: sheet.id || uid(),
     name: sheet.name || 'Untitled Sheet',
@@ -228,7 +360,9 @@ function normalizeSheet(sheet) {
     rows: rows.map(row => ({
       id: row.id || uid(),
       cells: { ...Object.fromEntries(columns.map(col => [col.id, ''])), ...(row.cells || {}) },
+      height: Number.isFinite(Number(row.height)) ? Number(row.height) : null,
     })),
+    wrap: typeof sheet.wrap === 'boolean' ? sheet.wrap : storedWrap !== false,
     created_at: sheet.created_at || new Date().toISOString(),
     updated_at: sheet.updated_at || new Date().toISOString(),
   }
@@ -270,6 +404,7 @@ export function useSheets(userId) {
     }
 
     let cancelled = false
+    let migrated = false
 
     async function loadAll() {
       const { data, error } = await supabase
@@ -279,13 +414,46 @@ export function useSheets(userId) {
         .order('updated_at', { ascending: false })
 
       if (cancelled) return
+
       if (error) {
+        // Table missing or RLS error — fall back to localStorage
         setCloudDisabled(true)
         setSheets(lsGetWithSeed())
-      } else {
-        setSheets((data || []).map(normalizeSheet))
+        setLoading(false)
+        return
       }
-      setLoading(false)
+
+      // Supabase is reachable. If cloud is empty on first load, migrate localStorage → Supabase
+      if ((data || []).length === 0 && !migrated) {
+        migrated = true
+        const local = lsGet()
+        const toMigrate = local.length > 0 ? local.map(normalizeSheet) : seedCoreSheets()
+        // Push everything up in parallel
+        const results = await Promise.all(toMigrate.map(s =>
+          supabase.from('sheets').insert({
+            id: s.id, user_id: userId,
+            name: s.name, columns: s.columns, rows: s.rows,
+            updated_at: s.updated_at || new Date().toISOString(),
+            created_at: s.created_at || new Date().toISOString(),
+          }).select()
+        ))
+        const failed = results.find(result => result.error)
+        if (failed) {
+          setCloudDisabled(true)
+          lsSet(toMigrate)
+          if (!cancelled) setSheets(mergeInventoryIntoMasterSheets(toMigrate))
+          if (!cancelled) setLoading(false)
+          return
+        }
+        if (!cancelled) {
+          setSheets(mergeInventoryIntoMasterSheets(toMigrate))
+          lsSet(toMigrate)
+        }
+      } else {
+        if (!cancelled) setSheets(mergeInventoryIntoMasterSheets(data || []))
+      }
+
+      if (!cancelled) setLoading(false)
     }
 
     loadAll()

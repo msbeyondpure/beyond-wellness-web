@@ -1,6 +1,7 @@
 /* eslint-disable react/prop-types */
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import { useFormulas } from '../hooks/useFormulas'
+import { LEGACY_INVENTORY_SHEET_NAME, MASTER_SOURCING_SHEET_NAME, useSheets } from '../hooks/useSheets'
 
 const Plus = () => <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
 const Trash = () => <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
@@ -40,7 +41,7 @@ function fSaveStack(key, arr) {
   try { localStorage.setItem(key, JSON.stringify(arr)) } catch { /* ignore storage failures */ }
 }
 function makeIngredient() {
-  return { id: crypto.randomUUID(), name: '', amount: '', cost: '', ratio: '', includeInRatio: true, link: '', notes: '' }
+  return { id: crypto.randomUUID(), name: '', amount: '', cost: '', ratio: '', includeInRatio: true, link: '', notes: '', sourcingItemId: '' }
 }
 function normalizeIngredient(ing = {}) {
   return {
@@ -52,6 +53,7 @@ function normalizeIngredient(ing = {}) {
     includeInRatio: ing.includeInRatio !== false,
     link: ing.link || '',
     notes: ing.notes || '',
+    sourcingItemId: ing.sourcingItemId || '',
   }
 }
 function normalizeFormula(f) {
@@ -68,8 +70,57 @@ function formulaSnapshot(f) {
   return { name: normalized.name, ingredients: JSON.parse(JSON.stringify(normalized.ingredients || [])), target_cost: normalized.target_cost || '', target_margin: normalized.target_margin || '', notes: normalized.notes || '' }
 }
 
-export default function Formulas({ userId, resetKey }) {
+function sourceCell(sheet, row, names) {
+  for (const name of names) {
+    const column = sheet.columns?.find(col => col.name.toLowerCase() === name.toLowerCase())
+    const value = column ? row.cells?.[column.id] : ''
+    if (String(value || '').trim()) return value
+  }
+  return ''
+}
+
+function buildSourceNotes(item) {
+  return [
+    item.category && `Category: ${item.category}`,
+    item.source && `Source: ${item.source}`,
+    item.unitPrice && `Unit price: ${item.unitPrice}`,
+    item.onHand && `On hand: ${item.onHand}${item.unit ? ` ${item.unit}` : ''}`,
+    item.reorderPoint && `Reorder point: ${item.reorderPoint}`,
+    item.inStock && `Stock: ${item.inStock}`,
+    item.status && `Status: ${item.status}`,
+    item.notes,
+  ].filter(Boolean).join('\n')
+}
+
+function buildSourcingItems(sheets) {
+  return sheets
+    .filter(sheet => [MASTER_SOURCING_SHEET_NAME, LEGACY_INVENTORY_SHEET_NAME].includes(sheet.name))
+    .flatMap(sheet => (sheet.rows || []).map(row => {
+      const name = sourceCell(sheet, row, ['Ingredient', 'Item Name', 'Component', 'Name'])
+      if (!String(name || '').trim()) return null
+      const item = {
+        key: `${sheet.id}:${row.id}`,
+        sheetName: sheet.name,
+        name,
+        category: sourceCell(sheet, row, ['Inventory Category', 'Item Type', 'Function']),
+        source: sourceCell(sheet, row, ['Preferred Source', 'Preferred Supplier', 'Supplier']),
+        link: sourceCell(sheet, row, ['Preferred Link', 'Supplier Link', 'Backup Link', 'Link']),
+        unitPrice: sourceCell(sheet, row, ['Unit Price', 'Unit Cost', 'Ingredient Cost / Unit']),
+        onHand: sourceCell(sheet, row, ['On Hand', 'Available']),
+        unit: sourceCell(sheet, row, ['Unit']),
+        reorderPoint: sourceCell(sheet, row, ['Reorder Point']),
+        inStock: sourceCell(sheet, row, ['IN STOCK']),
+        status: sourceCell(sheet, row, ['Status', 'Reorder Status']),
+        notes: sourceCell(sheet, row, ['Notes', 'Compliance Notes']),
+      }
+      return { ...item, notesPreview: buildSourceNotes(item) }
+    }).filter(Boolean))
+    .sort((a, b) => String(a.name).localeCompare(String(b.name)))
+}
+
+export default function Formulas({ userId, resetKey, registerUndo }) {
   const { formulas, loading, saveFormula, deleteFormula, addFormula } = useFormulas(userId)
+  const { sheets: sourcingSheets } = useSheets(userId)
   const [activeId, setActiveId] = useState(null)
   const [showNew, setShowNew] = useState(false)
   const [newName, setNewName] = useState('')
@@ -127,6 +178,8 @@ export default function Formulas({ userId, resetKey }) {
 
   const active = localFormulas.find(f => f.id === activeId)
   const selectedIngredient = active?.ingredients.find(ing => ing.id === selectedIngredientId)
+  const sourcingItems = useMemo(() => buildSourcingItems(sourcingSheets), [sourcingSheets])
+  const selectedSourcingItem = sourcingItems.find(item => item.key === selectedIngredient?.sourcingItemId)
 
   useEffect(() => {
     if (!active || !selectedIngredientId || !active.ingredients.some(ing => ing.id === selectedIngredientId)) {
@@ -206,19 +259,17 @@ export default function Formulas({ userId, resetKey }) {
     showToast('Redone')
   }
 
-  // Keyboard: Ctrl+Z / Ctrl+Y when not inside an input
+  // Register with global undo system (use refs so we never stale-close over active)
+  const undoFnRef = useRef(null)
+  const redoFnRef = useRef(null)
+  undoFnRef.current = performFormulaUndo
+  redoFnRef.current = performFormulaRedo
   useEffect(() => {
-    const fn = (e) => {
-      const mod = e.ctrlKey || e.metaKey
-      if (!mod) return
-      const inInput = ['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)
-      if (inInput) return
-      if (e.key === 'z' && !e.shiftKey) { e.preventDefault(); performFormulaUndo() }
-      if (e.key === 'y' || (e.shiftKey && e.key === 'Z')) { e.preventDefault(); performFormulaRedo() }
-    }
-    window.addEventListener('keydown', fn)
-    return () => window.removeEventListener('keydown', fn)
-  }) // no dep array — always reads latest refs / state
+    registerUndo?.(
+      () => undoFnRef.current?.(),
+      () => redoFnRef.current?.()
+    )
+  }, [registerUndo])
 
   function setFormulaLocal(formula, markDirty = true) {
     const normalized = normalizeFormula(formula)
@@ -399,6 +450,26 @@ export default function Formulas({ userId, resetKey }) {
     setSelectedIngredientId(null)
   }
 
+  function selectSourcingItem(key) {
+    if (!active || !selectedIngredient) return
+    const item = sourcingItems.find(source => source.key === key)
+    if (!item) {
+      const updated = updateIngredient(active.id, selectedIngredient.id, { sourcingItemId: '' })
+      if (updated) handleSave(updated)
+      return
+    }
+
+    const updates = {
+      sourcingItemId: item.key,
+      name: item.name || selectedIngredient.name,
+      link: item.link || selectedIngredient.link,
+      notes: selectedIngredient.notes || item.notesPreview || '',
+      cost: selectedIngredient.cost || item.unitPrice || '',
+    }
+    const updated = updateIngredient(active.id, selectedIngredient.id, updates)
+    if (updated) handleSave(updated)
+  }
+
   const ingredientMinWidth = 180
   const actionColWidth = 64
   const sheetMinWidth = 24 + ingredientMinWidth + colWidths.amount + colWidths.ratio + colWidths.cost + actionColWidth + 40
@@ -465,7 +536,26 @@ export default function Formulas({ userId, resetKey }) {
               </button>
             </div>
             <div className="p-4 overflow-y-auto">
-              <label className="text-xs text-gray-500 block mb-1">Link</label>
+              <label className="text-xs text-gray-500 block mb-1">Inventory / Master Sourcing Item</label>
+              <select
+                value={selectedIngredient.sourcingItemId || ''}
+                onChange={e => selectSourcingItem(e.target.value)}
+                className="w-full bg-brand-dark border border-white/10 rounded px-3 py-2 text-sm text-white outline-none focus:border-brand-accent/40"
+              >
+                <option value="">No linked sourcing item</option>
+                {sourcingItems.map(item => (
+                  <option key={item.key} value={item.key}>
+                    {item.name}{item.category ? ` - ${item.category}` : ''}{item.inStock ? ' - in stock' : ''}
+                  </option>
+                ))}
+              </select>
+              {selectedSourcingItem && (
+                <div className="mt-2 rounded border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-gray-400 whitespace-pre-wrap">
+                  {selectedSourcingItem.notesPreview || selectedSourcingItem.sheetName}
+                </div>
+              )}
+
+              <label className="text-xs text-gray-500 block mb-1 mt-4">Link</label>
               <input
                 value={selectedIngredient.link || ''}
                 onChange={e => updateIngredient(active.id, selectedIngredient.id, { link: e.target.value })}
@@ -785,6 +875,7 @@ export default function Formulas({ userId, resetKey }) {
                               onClick={() => setSelectedIngredientId(ing.id)}
                               className={`p-1 rounded transition-all ${ing.link || ing.notes ? 'text-brand-accent bg-brand-accent/10' : 'text-gray-600 hover:text-gray-300 hover:bg-white/10'}`}
                               title="Ingredient link and notes"
+                              aria-label={`Ingredient link and notes for ${ing.name || 'ingredient'}`}
                             >
                               <LinkIcon />
                             </button>

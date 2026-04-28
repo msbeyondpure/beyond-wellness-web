@@ -567,7 +567,7 @@ function getCursorPos(text, idx) {
 }
 
 // ── main component ────────────────────────────────────────────────────────────
-export default function Editor({ userId, resetKey }) {
+export default function Editor({ userId, resetKey, registerUndo }) {
   const { files, loading, createNode, saveContent, deleteNode, renameNode } = useEditorFiles(userId)
 
   const [activeFile, setActiveFile]       = useState(null)
@@ -645,6 +645,16 @@ export default function Editor({ userId, resetKey }) {
     saveStack(UNDO_KEY(activeFile.path), newUndo); saveStack(REDO_KEY(activeFile.path), newRedo)
     baselineRef.current = next; isUndoingRef.current = true; setContent(next); bumpHistory()
   }
+
+  // Register with global undo system (refs always point to latest, avoid stale closures)
+  const editorUndoRef = useRef(null); editorUndoRef.current = performUndo
+  const editorRedoRef = useRef(null); editorRedoRef.current = performRedo
+  useEffect(() => {
+    registerUndo?.(
+      () => editorUndoRef.current?.(),
+      () => editorRedoRef.current?.()
+    )
+  }, [registerUndo])
 
   // ── html toolkit helpers ───────────────────────────────────────────────────
   function insertHtml(html) {
