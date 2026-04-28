@@ -192,6 +192,11 @@ function lsSet(sheets) {
   localStorage.setItem(LS_KEY, JSON.stringify(sheets))
 }
 
+function sheetListChanged(a = [], b = []) {
+  if (a.length !== b.length) return true
+  return a.some((sheet, index) => sheet.id !== b[index]?.id || sheet.name !== b[index]?.name)
+}
+
 function valuesByColumnName(sheet, row) {
   return Object.fromEntries((sheet.columns || []).map(col => [col.name, row.cells?.[col.id] || '']))
 }
@@ -304,7 +309,11 @@ function seedCoreSheets() {
 
 function lsGetWithSeed() {
   const existing = lsGet()
-  if (existing.length || localStorage.getItem(LS_CORE_SEEDED_KEY) === '1') return mergeInventoryIntoMasterSheets(existing)
+  if (existing.length || localStorage.getItem(LS_CORE_SEEDED_KEY) === '1') {
+    const merged = mergeInventoryIntoMasterSheets(existing)
+    if (sheetListChanged(existing, merged)) lsSet(merged)
+    return merged
+  }
   const seeded = seedCoreSheets()
   lsSet(seeded)
   localStorage.setItem(LS_CORE_SEEDED_KEY, '1')
@@ -450,7 +459,33 @@ export function useSheets(userId) {
           lsSet(toMigrate)
         }
       } else {
-        if (!cancelled) setSheets(mergeInventoryIntoMasterSheets(data || []))
+        const raw = data || []
+        const merged = mergeInventoryIntoMasterSheets(raw)
+        if (!cancelled) setSheets(merged)
+
+        const inventoryIds = raw.filter(sheet => sheet.name === LEGACY_INVENTORY_SHEET_NAME).map(sheet => sheet.id).filter(Boolean)
+        const mergedMaster = merged.find(sheet => sheet.name === MASTER_SOURCING_SHEET_NAME)
+        if (inventoryIds.length && mergedMaster) {
+          const { error: upsertError } = await supabase
+            .from('sheets')
+            .upsert({
+              id: mergedMaster.id,
+              user_id: userId,
+              name: mergedMaster.name,
+              columns: mergedMaster.columns,
+              rows: mergedMaster.rows,
+              updated_at: mergedMaster.updated_at || new Date().toISOString(),
+              created_at: mergedMaster.created_at || new Date().toISOString(),
+            }, { onConflict: 'id' })
+
+          if (!upsertError) {
+            await supabase
+              .from('sheets')
+              .delete()
+              .eq('user_id', userId)
+              .in('id', inventoryIds)
+          }
+        }
       }
 
       if (!cancelled) setLoading(false)

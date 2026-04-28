@@ -16,8 +16,8 @@ const AffiliatesIcon = () => <svg width="22" height="22" viewBox="0 0 24 24" fil
 const FormulasIcon = () => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10 2v7.31"/><path d="M14 9.3V1.99"/><path d="M8.5 2h7"/><path d="M14 9.3a6.5 6.5 0 1 1-4 0"/></svg>
 const SheetsIcon = () => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M3 15h18"/><path d="M9 3v18"/><path d="M15 3v18"/></svg>
 const EditorIcon = () => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-const MoreIcon = () => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>
 const CloseIcon = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+const SignOutIcon = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
 
 const TABS = ['tasks', 'affiliates', 'formulas', 'sheets', 'editor']
 const PRIMARY_TABS = [
@@ -36,7 +36,7 @@ export default function Layout({ user, activeView, setActiveView, taskStats, onU
   const [showFile, setShowFile] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [showTrash, setShowTrash] = useState(false)
-  const [showMobileMore, setShowMobileMore] = useState(false)
+  const [showMobileNav, setShowMobileNav] = useState(false)
   const [settings, setSettings] = useState(() => {
     try { return JSON.parse(localStorage.getItem('bwSettings')) || { fontSize: 'medium' } } catch { return { fontSize: 'medium' } }
   })
@@ -66,11 +66,11 @@ export default function Layout({ user, activeView, setActiveView, taskStats, onU
     }
   }, [])
 
-  // Lock body scroll when mobile More sheet is open
+  // Lock body scroll when the mobile navigation drawer is open
   useEffect(() => {
-    document.body.style.overflow = showMobileMore ? 'hidden' : ''
+    document.body.style.overflow = showMobileNav ? 'hidden' : ''
     return () => { document.body.style.overflow = '' }
-  }, [showMobileMore])
+  }, [showMobileNav])
 
   const trashCount = trash.length
 
@@ -82,7 +82,7 @@ export default function Layout({ user, activeView, setActiveView, taskStats, onU
 
   const switchView = (v) => {
     setActiveView(v)
-    setShowMobileMore(false)
+    setShowMobileNav(false)
   }
 
   return (
@@ -94,9 +94,14 @@ export default function Layout({ user, activeView, setActiveView, taskStats, onU
 
             {/* Left: Logo + menus */}
             <div className="flex items-center gap-0.5 sm:gap-1 z-10">
-              <div className="w-5 h-5 sm:w-4 sm:h-4 rounded ml-2 mr-1 bg-brand-accent/80 flex items-center justify-center flex-shrink-0">
+              <button
+                onClick={e => { e.stopPropagation(); setShowMobileNav(v => !v); setShowFile(false); setShowSettings(false); setShowTrash(false) }}
+                className="w-7 h-7 sm:w-4 sm:h-4 rounded ml-1 sm:ml-2 mr-1 bg-brand-accent/80 flex items-center justify-center flex-shrink-0 border border-brand-accent/30 sm:pointer-events-none"
+                title="Navigation"
+                aria-label="Open navigation"
+              >
                 <div className="w-2.5 h-2.5 sm:w-2 sm:h-2 rounded-sm bg-white/80" />
-              </div>
+              </button>
 
               {/* File menu */}
               <div className="relative menu-keep">
@@ -227,64 +232,53 @@ export default function Layout({ user, activeView, setActiveView, taskStats, onU
         </div>
       </nav>
 
-      {/* === Page content (with bottom-nav padding on mobile) === */}
-      <div className={`${settings.fontSize === 'small' ? 'text-sm' : settings.fontSize === 'large' ? 'text-lg' : 'text-base'} pb-[calc(4rem+env(safe-area-inset-bottom,0px))] sm:pb-0`}>
+      {/* === Page content === */}
+      <div className={`${settings.fontSize === 'small' ? 'text-sm' : settings.fontSize === 'large' ? 'text-lg' : 'text-base'} pb-safe sm:pb-0`}>
         {children}
       </div>
 
-      {/* === Mobile bottom tab bar === */}
-      <nav className="mobile-bottom-nav sm:hidden">
-        {PRIMARY_TABS.map(t => (
-          <button
-            key={t.id}
-            onClick={() => switchView(t.id)}
-            className={activeView === t.id ? 'active' : ''}
-            title={t.label}
-            aria-label={t.label}
-            aria-current={activeView === t.id ? 'page' : undefined}
-          >
-            {t.icon}
-          </button>
-        ))}
-        <button
-          onClick={() => setShowMobileMore(true)}
-          className=""
-          title="More"
-          aria-label="More"
-        >
-          <MoreIcon />
-        </button>
-      </nav>
-
-      {/* === Mobile More sheet === */}
-      {showMobileMore && (
+      {/* === Mobile navigation drawer === */}
+      {showMobileNav && (
         <>
           <div
             className="fixed inset-0 bg-black/60 z-50 sm:hidden animate-fadeIn"
-            onClick={() => setShowMobileMore(false)}
+            onClick={() => setShowMobileNav(false)}
           />
           <div
-            className="fixed bottom-0 left-0 right-0 z-50 sm:hidden glass-card rounded-t-2xl border-t border-brand-accent/20 pb-safe"
+            className="fixed top-[calc(48px+env(safe-area-inset-top,0px))] bottom-0 left-0 z-50 sm:hidden w-[82vw] max-w-[320px] glass-card border-r border-brand-accent/20 pb-safe flex flex-col"
             style={{ animation: 'drawerSlideIn 0.22s ease', transform: 'none' }}
           >
             <div className="flex items-center justify-between px-5 py-4 border-b border-white/5">
-              <h3 className="text-white font-semibold text-base">More</h3>
-              <button onClick={() => setShowMobileMore(false)} className="nav-icon" title="Close" aria-label="Close menu">
+              <h3 className="text-white font-semibold text-base">Navigation</h3>
+              <button onClick={() => setShowMobileNav(false)} className="nav-icon" title="Close" aria-label="Close navigation">
                 <CloseIcon />
               </button>
             </div>
-            <div className="p-3 space-y-1">
+            <div className="p-3 space-y-1 flex-1 overflow-y-auto">
+              {PRIMARY_TABS.map(t => (
+                <button
+                  key={t.id}
+                  onClick={() => switchView(t.id)}
+                  className={`w-full flex items-center gap-3 px-4 py-3 rounded text-left transition-all ${activeView === t.id ? 'bg-brand-accent/15 text-brand-accent border border-brand-accent/20' : 'text-gray-300 hover:bg-white/10 active:bg-white/10'}`}
+                  aria-current={activeView === t.id ? 'page' : undefined}
+                >
+                  {t.icon}
+                  <span className="text-sm font-medium">{t.label}</span>
+                </button>
+              ))}
+            </div>
+            <div className="p-3 border-t border-white/5">
               {isConfigured && (
                 <button
-                  onClick={() => { setShowMobileMore(false); supabase.auth.signOut() }}
+                  onClick={() => { setShowMobileNav(false); supabase.auth.signOut() }}
                   className="w-full flex items-center gap-3 px-4 py-3 rounded text-left text-red-400 hover:bg-red-500/10 active:bg-red-500/20 transition-all"
                 >
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                  <SignOutIcon />
                   <span className="text-sm font-medium">Sign Out</span>
                 </button>
               )}
               {user && (
-                <div className="px-4 py-3 text-xs text-gray-500 border-t border-white/5 mt-2">
+                <div className="px-4 pt-3 text-xs text-gray-500 truncate">
                   Signed in as <span className="text-gray-300">{user.email}</span>
                 </div>
               )}

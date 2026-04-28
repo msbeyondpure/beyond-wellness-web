@@ -484,13 +484,13 @@ export default function Formulas({ userId, resetKey, registerUndo }) {
   )
 
   if (loading) return (
-    <div className="p-4 pt-6 animate-fadeIn flex items-center justify-center h-[calc(100dvh-160px)] sm:h-[calc(100dvh-40px)]">
+    <div className="p-4 pt-6 animate-fadeIn flex items-center justify-center h-[calc(100dvh-64px)] sm:h-[calc(100dvh-40px)]">
       <span className="text-gray-600 text-sm">Loading formulas...</span>
     </div>
   )
 
   return (
-    <div className="p-3 pt-4 sm:p-4 sm:pt-6 animate-fadeIn h-[calc(100dvh-136px)] sm:h-[calc(100dvh-40px)] min-h-[360px]">
+    <div className="p-3 pt-4 sm:p-4 sm:pt-6 animate-fadeIn h-[calc(100dvh-64px)] sm:h-[calc(100dvh-40px)] min-h-[360px]">
       <Toast msg={toast} />
 
       {/* Import modal */}
@@ -748,10 +748,114 @@ export default function Formulas({ userId, resetKey, registerUndo }) {
                 </div>
               </div>
 
-              {/* Ingredient table — horizontal scroll on mobile */}
-              <div className="flex-1 overflow-y-auto min-h-0">
-                {/* Scrollable grid area */}
-                <div className="overflow-x-auto pb-1 -mx-1 px-1" style={{ WebkitOverflowScrolling: 'touch' }}>
+              {/* Ingredient editor */}
+              <div className="flex-1 overflow-y-auto overflow-x-hidden min-h-0">
+                <div className="sm:hidden space-y-2">
+                  {active.ingredients.map(ing => {
+                    const previewVal = getRatioPreview(active, ing, ratioPreview.sourceId, ratioPreview.sourceValue)
+                    const isSource = ratioPreview.sourceId === ing.id
+                    const showingPreview = previewVal !== null
+
+                    return (
+                      <div key={ing.id} className="rounded border border-white/10 bg-white/[0.035] p-3 space-y-3">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <button
+                            title={ing.includeInRatio ? 'Included in ratio' : 'Excluded from ratio'}
+                            aria-label={ing.includeInRatio ? 'Included in ratio' : 'Excluded from ratio'}
+                            onClick={() => {
+                              const updated = updateIngredient(active.id, ing.id, { includeInRatio: !ing.includeInRatio })
+                              if (updated) handleSave(updated)
+                            }}
+                            className="shrink-0"
+                            style={{ width: 18, height: 18, borderRadius: 4, border: '1px solid', borderColor: ing.includeInRatio ? '#c45e2c' : 'rgba(255,255,255,0.18)', background: ing.includeInRatio ? 'rgba(196,94,44,0.22)' : 'transparent' }}
+                          />
+                          <input
+                            value={ing.name}
+                            onChange={e => updateIngredient(active.id, ing.id, { name: e.target.value })}
+                            onBlur={() => saveIngredient(active.id)}
+                            placeholder="Ingredient name"
+                            className="min-w-0 flex-1 bg-transparent border-none outline-none text-white placeholder-gray-700"
+                          />
+                          <button
+                            onClick={() => setSelectedIngredientId(ing.id)}
+                            className={`p-2 rounded shrink-0 transition-all ${ing.link || ing.notes ? 'text-brand-accent bg-brand-accent/10' : 'text-gray-600 bg-white/5'}`}
+                            title="Ingredient link and notes"
+                            aria-label={`Ingredient link and notes for ${ing.name || 'ingredient'}`}
+                          >
+                            <LinkIcon />
+                          </button>
+                          <button
+                            onClick={() => removeIngredient(active.id, ing.id)}
+                            className="p-2 rounded shrink-0 text-gray-600 bg-white/5 active:text-red-400"
+                            title="Remove ingredient"
+                            aria-label={`Remove ${ing.name || 'ingredient'}`}
+                          >
+                            <Trash />
+                          </button>
+                        </div>
+
+                        <div className="grid grid-cols-3 gap-2 min-w-0">
+                          <label className="min-w-0">
+                            <span className="block text-[11px] text-gray-600 mb-1">Amount</span>
+                            <input
+                              value={ing.amount}
+                              onChange={e => updateIngredient(active.id, ing.id, { amount: e.target.value })}
+                              onBlur={() => saveIngredient(active.id)}
+                              placeholder="100g"
+                              className="w-full min-w-0 bg-brand-dark border border-white/10 rounded px-2 py-1.5 text-white placeholder-gray-700 outline-none focus:border-brand-accent/40"
+                            />
+                          </label>
+                          <label className="min-w-0 relative">
+                            <span className="block text-[11px] text-gray-600 mb-1">Ratio</span>
+                            <input
+                              value={isSource ? ratioPreview.sourceValue : (showingPreview ? previewVal : (ing.ratio || ''))}
+                              readOnly={showingPreview && !isSource}
+                              onChange={e => {
+                                if (isSource || ratioPreview.sourceId === null) {
+                                  setRatioPreview({ sourceId: ing.id, sourceValue: e.target.value })
+                                }
+                              }}
+                              onFocus={() => {
+                                if (!isSource) setRatioPreview({ sourceId: ing.id, sourceValue: ing.ratio || '' })
+                              }}
+                              onBlur={e => {
+                                if (isSource) {
+                                  const updated = updateIngredient(active.id, ing.id, { ratio: e.currentTarget.value })
+                                  if (updated) handleSave(updated)
+                                }
+                                setRatioPreview({ sourceId: null, sourceValue: '' })
+                              }}
+                              placeholder="ratio"
+                              className="w-full min-w-0 bg-brand-dark border border-white/10 rounded px-2 py-1.5 text-white placeholder-gray-700 outline-none focus:border-brand-accent/40"
+                              style={{
+                                background: isSource ? 'rgba(196,94,44,0.1)' : showingPreview ? 'rgba(139,154,62,0.08)' : undefined,
+                                borderColor: isSource ? 'rgba(196,94,44,0.4)' : undefined,
+                                color: showingPreview && !isSource ? '#8b9a3e' : undefined,
+                              }}
+                            />
+                            {!ing.includeInRatio && (
+                              <span className="absolute left-0 right-0 bottom-0 h-[34px] rounded bg-black/35 pointer-events-none flex items-center justify-center text-[10px] text-gray-500">
+                                excl.
+                              </span>
+                            )}
+                          </label>
+                          <label className="min-w-0">
+                            <span className="block text-[11px] text-gray-600 mb-1">Cost</span>
+                            <input
+                              value={ing.cost}
+                              onChange={e => updateIngredient(active.id, ing.id, { cost: e.target.value })}
+                              onBlur={() => saveIngredient(active.id)}
+                              placeholder="0.00"
+                              className="w-full min-w-0 bg-brand-dark border border-white/10 rounded px-2 py-1.5 text-white placeholder-gray-700 outline-none focus:border-brand-accent/40"
+                            />
+                          </label>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+
+                <div className="hidden sm:block overflow-x-auto pb-1 -mx-1 px-1" style={{ WebkitOverflowScrolling: 'touch' }}>
                   <div style={{ minWidth: sheetMinWidth }}>
                     {/* Column headers */}
                     <div

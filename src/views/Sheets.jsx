@@ -481,6 +481,8 @@ export default function Sheets({ userId, resetKey, registerUndo }) {
   const [openBatchSheetId, setOpenBatchSheetId] = useState(null)
   const [activeBatchProduct, setActiveBatchProduct] = useState(null)
   const [showImport, setShowImport] = useState(false)
+  const [showColumnMenu, setShowColumnMenu] = useState(false)
+  const [detailRowId, setDetailRowId] = useState(null)
   const [importText, setImportText] = useState('')
   const [importError, setImportError] = useState('')
   const [importUseHeader, setImportUseHeader] = useState(true)
@@ -490,7 +492,6 @@ export default function Sheets({ userId, resetKey, registerUndo }) {
   const [editingName, setEditingName] = useState(false)
   const [nameDraft, setNameDraft] = useState('')
   const [saveState, setSaveState] = useState('idle')
-  const [expandedRows, setExpandedRows] = useState(new Set())
   const [sidebarW, setSidebarW] = useState(loadSidebarW)
   const [dragColumnId, setDragColumnId] = useState(null)
   const [dragSheetId, setDragSheetId] = useState(null)
@@ -539,7 +540,8 @@ export default function Sheets({ userId, resetKey, registerUndo }) {
     if (!activeId) return
     setShowMobileSidebar(false)
     setEditingName(false)
-    setExpandedRows(new Set())
+    setShowColumnMenu(false)
+    setDetailRowId(null)
     undoStackRef.current = []
     redoStackRef.current = []
     setHistoryVersion(v => v + 1)
@@ -554,6 +556,8 @@ export default function Sheets({ userId, resetKey, registerUndo }) {
     setActiveBatchProduct(null)
     setImportError('')
     setShowMobileSidebar(false)
+    setShowColumnMenu(false)
+    setDetailRowId(null)
     setEditingName(false)
     setActiveId(null)
   }, [resetKey])
@@ -577,6 +581,9 @@ export default function Sheets({ userId, resetKey, registerUndo }) {
     if (!active || !activeIsBatchProduction || !activeBatchProduct) return active?.rows || []
     return active.rows.filter(row => cellByName(active, row, 'Product') === activeBatchProduct)
   }, [active, activeBatchProduct, activeIsBatchProduction])
+  const detailPopupRow = useMemo(() => (
+    detailRowId ? visibleRows.find(row => row.id === detailRowId) || active?.rows.find(row => row.id === detailRowId) : null
+  ), [active, detailRowId, visibleRows])
 
   const sheetMinWidth = useMemo(() => {
     if (!active) return 760
@@ -647,6 +654,13 @@ export default function Sheets({ userId, resetKey, registerUndo }) {
       bumpHistory()
     }
     return applySheet(sheet)
+  }
+
+  function queueSaveNow(sheet, addToHistory = true, historySheet = active) {
+    const normalized = queueSave(sheet, addToHistory, historySheet)
+    const version = saveVersionRef.current[normalized.id] || 0
+    saveSheetNow(normalized.id, version)
+    return normalized
   }
 
   function undo() {
@@ -807,17 +821,21 @@ export default function Sheets({ userId, resetKey, registerUndo }) {
 
   function deleteRow(rowId) {
     if (!active) return
-    setExpandedRows(prev => {
-      const next = new Set(prev)
-      next.delete(rowId)
-      return next
-    })
-    queueSave({ ...active, rows: active.rows.filter(row => row.id !== rowId) })
+    if (detailRowId === rowId) setDetailRowId(null)
+    queueSaveNow({ ...active, rows: active.rows.filter(row => row.id !== rowId) })
   }
 
   function addColumn() {
     if (!active) return
     const column = makeColumn(`Column ${active.columns.length + 1}`, active.columns.length)
+    const columns = [...active.columns, column]
+    const rows = active.rows.map(row => ({ ...row, cells: { ...row.cells, [column.id]: '' } }))
+    queueSave({ ...active, columns, rows })
+  }
+
+  function addDetailColumn() {
+    if (!active) return
+    const column = { ...makeColumn(`Detail ${detailCols.length + 1}`, active.columns.length), pinned: false }
     const columns = [...active.columns, column]
     const rows = active.rows.map(row => ({ ...row, cells: { ...row.cells, [column.id]: '' } }))
     queueSave({ ...active, columns, rows })
@@ -831,7 +849,7 @@ export default function Sheets({ userId, resetKey, registerUndo }) {
       columns.forEach(col => { cells[col.id] = row.cells[col.id] || '' })
       return { ...row, cells }
     })
-    queueSave({ ...active, columns, rows })
+    queueSaveNow({ ...active, columns, rows })
   }
 
   function pinColumn(colId) {
@@ -983,20 +1001,6 @@ export default function Sheets({ userId, resetKey, registerUndo }) {
     queueSave({ ...active, columns: active.columns.map(col => col.id === colId ? { ...col, wrap: nextColumnWrapState(col) } : col) })
   }
 
-  function toggleRowExpand(rowId) {
-    setExpandedRows(prev => {
-      const next = new Set(prev)
-      if (next.has(rowId)) next.delete(rowId)
-      else next.add(rowId)
-      return next
-    })
-  }
-
-  function toggleAllExpanded() {
-    const allExpanded = visibleRows.length > 0 && visibleRows.every(row => expandedRows.has(row.id))
-    setExpandedRows(allExpanded ? new Set() : new Set(visibleRows.map(row => row.id)))
-  }
-
   async function removeSheet(id) {
     if (!confirm('Delete this sheet?')) return
     const nextActive = localSheets.find(sheet => sheet.id !== id)?.id || null
@@ -1043,10 +1047,9 @@ export default function Sheets({ userId, resetKey, registerUndo }) {
   }
 
   const saveLabel = usingLocalSheets ? 'local' : saveState === 'saving' ? 'saving' : saveState === 'dirty' ? 'unsaved' : saveState === 'saved' ? 'saved' : 'synced'
-  const allExpanded = visibleRows.length > 0 && visibleRows.every(row => expandedRows.has(row.id))
 
   return (
-    <div className="p-3 pt-4 sm:p-4 sm:pt-6 animate-fadeIn h-[calc(100dvh-136px)] sm:h-[calc(100dvh-40px)] min-h-[360px]">
+    <div className="p-3 pt-4 sm:p-4 sm:pt-6 animate-fadeIn h-[calc(100dvh-64px)] sm:h-[calc(100dvh-40px)] min-h-[360px]">
       <Modal open={showImport} onClose={() => { setShowImport(false); setImportError('') }} title="Import Sheet">
         <div className="p-4 space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -1079,6 +1082,111 @@ export default function Sheets({ userId, resetKey, registerUndo }) {
           <div className="flex justify-end gap-2">
             <button onClick={() => { setShowImport(false); setImportError('') }} className="px-3 py-2 bg-white/10 text-gray-300 rounded text-sm hover:bg-white/20">Cancel</button>
             <button onClick={submitImport} className="btn-primary px-4 py-2 rounded text-sm flex items-center gap-2"><ImportIcon /> Import</button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal open={showColumnMenu && !!active} onClose={() => setShowColumnMenu(false)} title="Sheet Fields">
+        <div className="p-4 space-y-4">
+          <div className="rounded border border-white/10 bg-white/[0.03] p-3">
+            <div className="flex items-center justify-between gap-2 mb-3">
+              <h4 className="text-xs font-semibold uppercase tracking-wide text-white">Main columns</h4>
+              <button onClick={addColumn} className="px-2 py-1 rounded bg-white/10 text-gray-300 text-xs hover:bg-white/15">Add column</button>
+            </div>
+            <div
+              className="flex flex-wrap gap-2 min-h-[36px]"
+              onDragOver={allowColumnDrop}
+              onDrop={e => dropColumn(e, true)}
+            >
+              {pinnedCols.map(col => (
+                <ColumnChip
+                  key={col.id}
+                  col={col}
+                  mode="main"
+                  onPin={pinColumn}
+                  onUnpin={unpinColumn}
+                  onDelete={deleteColumn}
+                  disableUnpin={pinnedCols.length <= 1}
+                  onDragStart={startColumnDrag}
+                  onDragOver={allowColumnDrop}
+                  onDrop={(e, targetId) => dropColumn(e, true, targetId)}
+                  onDragEnd={() => setDragColumnId(null)}
+                  dragging={dragColumnId === col.id}
+                />
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded border border-white/10 bg-white/[0.03] p-3">
+            <div className="flex items-center justify-between gap-2 mb-3">
+              <h4 className="text-xs font-semibold uppercase tracking-wide text-white">Row popup details</h4>
+              <button onClick={addDetailColumn} className="px-2 py-1 rounded bg-white/10 text-gray-300 text-xs hover:bg-white/15">Add detail</button>
+            </div>
+            <div
+              className="flex flex-wrap gap-2 min-h-[36px]"
+              onDragOver={allowColumnDrop}
+              onDrop={e => dropColumn(e, false)}
+            >
+              {detailCols.length ? detailCols.map(col => (
+                <ColumnChip
+                  key={col.id}
+                  col={col}
+                  mode="detail"
+                  onPin={pinColumn}
+                  onUnpin={unpinColumn}
+                  onDelete={deleteColumn}
+                  onDragStart={startColumnDrag}
+                  onDragOver={allowColumnDrop}
+                  onDrop={(e, targetId) => dropColumn(e, false, targetId)}
+                  onDragEnd={() => setDragColumnId(null)}
+                  dragging={dragColumnId === col.id}
+                />
+              )) : (
+                <p className="text-xs text-gray-600 py-2">No popup-only fields yet.</p>
+              )}
+            </div>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={!!active && !!detailPopupRow}
+        onClose={() => setDetailRowId(null)}
+        title={detailPopupRow && active ? rowSummary(active, detailPopupRow, pinnedCols) : 'Row details'}
+      >
+        <div className="p-4 space-y-3">
+          {detailCols.length ? detailCols.map(col => (
+            <div
+              key={col.id}
+              draggable
+              onDragStart={e => startColumnDrag(e, col.id)}
+              onDragOver={allowColumnDrop}
+              onDrop={e => dropColumn(e, false, col.id)}
+              onDragEnd={() => setDragColumnId(null)}
+              className={`min-w-0 bg-black/10 border rounded p-2 cursor-grab active:cursor-grabbing ${dragColumnId === col.id ? 'border-brand-accent/50 opacity-80' : 'border-white/5'}`}
+              title="Drag to reorder popup details"
+            >
+              <div className="flex items-center justify-between gap-2 mb-1">
+                <span className="text-[11px] text-white font-medium truncate">{col.name}</span>
+                <div className="flex items-center gap-1">
+                  <button onClick={() => pinColumn(col.id)} className="text-brand-accent/70 hover:text-brand-accent p-1 rounded" title="Move to main columns" aria-label={`Move ${col.name} to main columns`}>
+                    <PinUp />
+                  </button>
+                  <button onClick={() => deleteColumn(col.id)} className="text-red-400/70 hover:text-red-400 p-1 rounded" title="Delete detail" aria-label={`Delete ${col.name}`}>
+                    <Trash />
+                  </button>
+                </div>
+              </div>
+              {detailPopupRow && renderSheetCell(detailPopupRow, col, { rows: 3, minHeight: '86px', className: 'bg-brand-dark border-white/10 focus:border-brand-accent/40' })}
+            </div>
+          )) : (
+            <div className="rounded border border-white/10 bg-white/[0.03] p-4 text-sm text-gray-500">
+              No popup detail fields yet.
+            </div>
+          )}
+          <div className="flex flex-wrap justify-between gap-2 pt-1">
+            <button onClick={() => { setDetailRowId(null); setShowColumnMenu(true) }} className="px-3 py-2 rounded bg-white/10 text-gray-300 text-sm hover:bg-white/15">Manage fields</button>
+            <button onClick={() => setDetailRowId(null)} className="btn-primary px-4 py-2 rounded text-sm">Done</button>
           </div>
         </div>
       </Modal>
@@ -1265,8 +1373,10 @@ export default function Sheets({ userId, resetKey, registerUndo }) {
                 ) : (
                   <h2
                     onClick={() => { setNameDraft(active.name); setEditingName(true) }}
-                    className="text-base sm:text-lg font-semibold text-white cursor-pointer hover:text-brand-accent transition-colors flex items-center gap-2 select-none truncate min-w-0 flex-1"
-                    title="Rename"
+                    onDragOver={dragColumnId ? allowColumnDrop : undefined}
+                    onDrop={dragColumnId ? e => dropColumn(e, false) : undefined}
+                    className={`text-base sm:text-lg font-semibold text-white cursor-pointer transition-colors flex items-center gap-2 select-none truncate min-w-0 flex-1 rounded px-1 -mx-1 ${dragColumnId ? 'border border-dashed border-brand-accent/40 bg-brand-accent/5 text-brand-accent' : 'border border-transparent hover:text-brand-accent'}`}
+                    title={dragColumnId ? 'Drop column here to move it into row details' : 'Rename'}
                   >
                     <span className="truncate">{active.name}</span>
                     {activeIsBatchProduction && activeBatchProduct && (
@@ -1304,95 +1414,48 @@ export default function Sheets({ userId, resetKey, registerUndo }) {
                   <Plus /> Column
                 </button>
                 <button
+                  onClick={() => setShowColumnMenu(true)}
+                  className="px-3 py-1.5 bg-white/10 text-gray-300 rounded text-sm hover:bg-white/20 flex items-center gap-1 shrink-0"
+                  title="Manage sheet fields"
+                  aria-label="Manage sheet fields"
+                >
+                  Fields
+                </button>
+                <button
                   onClick={toggleGlobalWrap}
-                  className={`px-3 py-1.5 rounded text-sm flex items-center gap-1 shrink-0 ${active.wrap === false ? 'bg-white/10 text-gray-400 hover:bg-white/20' : 'bg-brand-accent/15 text-brand-accent border border-brand-accent/20'}`}
+                  className={`hidden sm:flex px-3 py-1.5 rounded text-sm items-center gap-1 shrink-0 ${active.wrap === false ? 'bg-brand-accent/15 text-brand-accent border border-brand-accent/20' : 'bg-white/10 text-gray-400 hover:bg-white/20'}`}
                   title="Toggle cell text wrapping"
                   aria-label="Toggle cell text wrapping"
                 >
                   Wrap {active.wrap === false ? 'Off' : 'On'}
                 </button>
-                {hasDetails && (
-                  <button onClick={toggleAllExpanded} className="px-3 py-1.5 bg-white/10 text-gray-400 rounded text-sm hover:bg-white/20 flex items-center gap-1.5 shrink-0">
-                    <ExpandChev open={allExpanded} />
-                    <span className="text-xs">{allExpanded ? 'Collapse all' : 'Expand all'}</span>
-                  </button>
-                )}
               </div>
 
-              <div className="sm:hidden shrink-0 space-y-1.5 mb-2">
-                <div
-                  className="flex items-center gap-2 overflow-x-auto scrollbar-hide pb-1 rounded border border-transparent"
-                  onDragOver={allowColumnDrop}
-                  onDrop={e => dropColumn(e, true)}
-                >
-                  <span className="text-[10px] text-gray-600 font-semibold uppercase tracking-wide shrink-0">Main</span>
-                  {pinnedCols.map(col => (
-                    <ColumnChip
-                      key={col.id}
-                      col={col}
-                      mode="main"
-                      onPin={pinColumn}
-                      onUnpin={unpinColumn}
-                      onDelete={deleteColumn}
-                      disableUnpin={pinnedCols.length <= 1}
-                      onDragStart={startColumnDrag}
-                      onDragOver={allowColumnDrop}
-                      onDrop={(e, targetId) => dropColumn(e, true, targetId)}
-                      onDragEnd={() => setDragColumnId(null)}
-                      dragging={dragColumnId === col.id}
-                    />
-                  ))}
-                </div>
-                {hasDetails && (
-                  <div
-                    className="flex items-center gap-2 overflow-x-auto scrollbar-hide pb-1 rounded border border-transparent"
+              <div
+                className="mb-2 shrink-0 rounded border border-white/10 bg-white/[0.035] px-2 py-2 flex items-center gap-2 overflow-x-auto scrollbar-hide"
+                onDragOver={allowColumnDrop}
+                onDrop={e => dropColumn(e, false)}
+              >
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-white shrink-0">Details</span>
+                {detailCols.length ? detailCols.map(col => (
+                  <ColumnChip
+                    key={col.id}
+                    col={col}
+                    mode="detail"
+                    onPin={pinColumn}
+                    onUnpin={unpinColumn}
+                    onDelete={deleteColumn}
+                    onDragStart={startColumnDrag}
                     onDragOver={allowColumnDrop}
-                    onDrop={e => dropColumn(e, false)}
-                  >
-                    <span className="text-[10px] text-gray-600 font-semibold uppercase tracking-wide shrink-0">Details</span>
-                    {detailCols.map(col => (
-                      <ColumnChip
-                        key={col.id}
-                        col={col}
-                        mode="detail"
-                        onPin={pinColumn}
-                        onUnpin={unpinColumn}
-                        onDelete={deleteColumn}
-                        onDragStart={startColumnDrag}
-                        onDragOver={allowColumnDrop}
-                        onDrop={(e, targetId) => dropColumn(e, false, targetId)}
-                        onDragEnd={() => setDragColumnId(null)}
-                        dragging={dragColumnId === col.id}
-                      />
-                    ))}
-                  </div>
+                    onDrop={(e, targetId) => dropColumn(e, false, targetId)}
+                    onDragEnd={() => setDragColumnId(null)}
+                    dragging={dragColumnId === col.id}
+                  />
+                )) : (
+                  <span className="text-xs text-gray-500 shrink-0">Drag columns here to keep them in the row popup.</span>
                 )}
+                <button onClick={addDetailColumn} className="ml-auto px-2 py-1 rounded bg-white/10 text-gray-300 text-xs hover:bg-white/15 shrink-0">Add detail</button>
               </div>
-
-              {hasDetails && (
-                <div
-                  className="hidden sm:flex items-center gap-2 mb-2 shrink-0 bg-white/[0.02] rounded px-2 py-1.5 border border-white/5 overflow-x-auto scrollbar-hide"
-                  onDragOver={allowColumnDrop}
-                  onDrop={e => dropColumn(e, false)}
-                >
-                  <span className="text-[10px] text-gray-600 font-semibold uppercase tracking-wide shrink-0">Details</span>
-                  {detailCols.map(col => (
-                    <ColumnChip
-                      key={col.id}
-                      col={col}
-                      mode="detail"
-                      onPin={pinColumn}
-                      onUnpin={unpinColumn}
-                      onDelete={deleteColumn}
-                      onDragStart={startColumnDrag}
-                      onDragOver={allowColumnDrop}
-                      onDrop={(e, targetId) => dropColumn(e, false, targetId)}
-                      onDragEnd={() => setDragColumnId(null)}
-                      dragging={dragColumnId === col.id}
-                    />
-                  ))}
-                </div>
-              )}
 
               <div className="hidden sm:block flex-1 overflow-auto min-h-0 -mx-1 px-1" style={{ WebkitOverflowScrolling: 'touch' }}>
                 <div style={{ minWidth: sheetMinWidth }}>
@@ -1426,7 +1489,7 @@ export default function Sheets({ userId, resetKey, registerUndo }) {
                           className="w-full min-h-[31px] max-h-[78px] px-2 py-1.5 bg-white/5 border border-white/10 rounded text-gray-300 text-xs font-medium outline-none focus:border-brand-accent/40 resize-none overflow-hidden leading-4 whitespace-normal"
                           style={{ overflowWrap: 'anywhere' }}
                         />
-                        <span className={`self-start mt-1 px-1.5 py-0.5 rounded text-[9px] font-semibold shrink-0 ${typeof col.wrap === 'boolean' ? 'bg-brand-accent/15 text-brand-accent' : 'bg-white/5 text-gray-500'}`}>
+                        <span className={`self-start mt-1 px-1.5 py-0.5 rounded text-[9px] font-semibold shrink-0 ${columnWrap(active, col) ? 'bg-white/5 text-gray-500' : 'bg-brand-accent/15 text-brand-accent'}`}>
                           {wrapBadge(active, col)}
                         </span>
                         <button
@@ -1453,12 +1516,11 @@ export default function Sheets({ userId, resetKey, registerUndo }) {
                         />
                       </div>
                     ))}
-                    {hasDetails && <button onClick={toggleAllExpanded} className="flex items-center justify-center text-gray-500 hover:text-brand-accent transition-colors" title={allExpanded ? 'Collapse all' : 'Expand all'} aria-label={allExpanded ? 'Collapse all' : 'Expand all'}><ExpandChev open={allExpanded} /></button>}
+                    {hasDetails && <div className="text-[11px] text-gray-600 uppercase tracking-wider px-1 py-2 text-center">Info</div>}
                     <div />
                   </div>
 
                   {visibleRows.map((row, rowIndex) => {
-                    const isExpanded = expandedRows.has(row.id)
                     const outOfStock = rowIsOutOfStock(active, row)
                     const rowPixels = rowHeight(row)
                     return (
@@ -1487,12 +1549,12 @@ export default function Sheets({ userId, resetKey, registerUndo }) {
                           {hasDetails && (
                             <div className="flex items-start justify-center pt-2">
                               <button
-                                onClick={() => toggleRowExpand(row.id)}
-                                className={`p-1.5 rounded transition-all ${isExpanded ? 'text-brand-accent bg-brand-accent/10' : 'text-gray-600 hover:text-gray-300 hover:bg-white/5'}`}
-                                title={isExpanded ? 'Collapse details' : 'Expand details'}
-                                aria-label={`${isExpanded ? 'Collapse' : 'Expand'} row ${rowIndex + 1}`}
+                                onClick={() => setDetailRowId(row.id)}
+                                className="p-1.5 rounded transition-all text-gray-600 hover:text-gray-300 hover:bg-white/5"
+                                title="Open row details"
+                                aria-label={`Open row ${rowIndex + 1} details`}
                               >
-                                <ExpandChev open={isExpanded} />
+                                <ExpandChev open={false} />
                               </button>
                             </div>
                           )}
@@ -1511,32 +1573,6 @@ export default function Sheets({ userId, resetKey, registerUndo }) {
                           />
                         </div>
 
-                        {isExpanded && hasDetails && (
-                          <div className="border-b border-white/5 bg-white/[0.025] px-3 py-3 animate-slideUp">
-                            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-                              {detailCols.map(col => (
-                                <div
-                                  key={col.id}
-                                  draggable
-                                  onDragStart={e => startColumnDrag(e, col.id)}
-                                  onDragOver={allowColumnDrop}
-                                  onDrop={e => dropColumn(e, false, col.id)}
-                                  onDragEnd={() => setDragColumnId(null)}
-                                  className={`min-w-0 bg-black/10 border rounded p-2 cursor-grab active:cursor-grabbing ${dragColumnId === col.id ? 'border-brand-accent/50 opacity-80' : 'border-white/5'}`}
-                                  title="Drag to the main header to make this a column"
-                                >
-                                  <div className="flex items-center justify-between gap-2 mb-1">
-                                    <span className="text-[11px] text-gray-500 font-medium truncate">{col.name}</span>
-                                    <button onClick={() => pinColumn(col.id)} className="text-brand-accent/70 hover:text-brand-accent p-1 rounded" title="Move to main columns" aria-label={`Move ${col.name} to main columns`}>
-                                      <PinUp />
-                                    </button>
-                                  </div>
-                                  {renderSheetCell(row, col, { rows: 2, minHeight: '64px', className: 'bg-brand-dark border-white/10 focus:border-brand-accent/40' })}
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        )}
                       </div>
                     )
                   })}
@@ -1545,13 +1581,12 @@ export default function Sheets({ userId, resetKey, registerUndo }) {
 
               <div className="sm:hidden flex-1 overflow-y-auto min-h-0 space-y-3 pr-0.5" style={{ WebkitOverflowScrolling: 'touch' }}>
                 {visibleRows.map((row, rowIndex) => {
-                  const isExpanded = expandedRows.has(row.id)
                   const outOfStock = rowIsOutOfStock(active, row)
                   return (
                     <div key={row.id} className={`bg-white/[0.04] border rounded-lg p-3 ${outOfStock ? 'border-red-500/60 ring-1 ring-red-500/35 bg-red-500/[0.04]' : 'border-white/10'}`}>
                       <div className="flex items-center justify-between gap-2">
                         <button
-                          onClick={() => hasDetails && toggleRowExpand(row.id)}
+                          onClick={() => hasDetails && setDetailRowId(row.id)}
                           className={`flex-1 min-w-0 text-left rounded ${hasDetails ? 'active:text-brand-accent' : ''}`}
                           disabled={!hasDetails}
                         >
@@ -1560,12 +1595,12 @@ export default function Sheets({ userId, resetKey, registerUndo }) {
                         </button>
                         {hasDetails && (
                           <button
-                            onClick={() => toggleRowExpand(row.id)}
-                            className={`p-2 rounded transition-all ${isExpanded ? 'text-brand-accent bg-brand-accent/10' : 'text-gray-500 bg-white/5'}`}
-                            title={isExpanded ? 'Collapse details' : 'Expand details'}
-                            aria-label={`${isExpanded ? 'Collapse' : 'Expand'} row ${rowIndex + 1}`}
+                            onClick={() => setDetailRowId(row.id)}
+                            className="p-2 rounded transition-all text-gray-500 bg-white/5"
+                            title="Open row details"
+                            aria-label={`Open row ${rowIndex + 1} details`}
                           >
-                            <ExpandChev open={isExpanded} />
+                            <ExpandChev open={false} />
                           </button>
                         )}
                         <button onClick={() => deleteRow(row.id)} className="p-2 text-red-400 bg-white/5 rounded" title="Delete row" aria-label={`Delete row ${rowIndex + 1}`}>
@@ -1592,31 +1627,6 @@ export default function Sheets({ userId, resetKey, registerUndo }) {
                           </div>
                         ))}
                       </div>
-
-                      {isExpanded && hasDetails && (
-                        <div className="mt-4 pt-3 border-t border-white/10 space-y-3 animate-slideUp">
-                          {detailCols.map(col => (
-                            <div
-                              key={col.id}
-                              draggable
-                              onDragStart={e => startColumnDrag(e, col.id)}
-                              onDragOver={allowColumnDrop}
-                              onDrop={e => dropColumn(e, false, col.id)}
-                              onDragEnd={() => setDragColumnId(null)}
-                              className={`min-w-0 bg-black/10 border rounded p-2 cursor-grab active:cursor-grabbing ${dragColumnId === col.id ? 'border-brand-accent/50 opacity-80' : 'border-white/5'}`}
-                              title="Drag to Main to make this a column"
-                            >
-                              <div className="flex items-center justify-between gap-2 mb-1">
-                                <span className="text-[11px] text-gray-500 font-medium truncate">{col.name}</span>
-                                <button onClick={() => pinColumn(col.id)} className="text-brand-accent/70 p-1 rounded" title="Move to main columns" aria-label={`Move ${col.name} to main columns`}>
-                                  <PinUp />
-                                </button>
-                              </div>
-                              {renderSheetCell(row, col, { rows: 2, minHeight: '74px', className: 'bg-brand-dark border-white/10 focus:border-brand-accent/40' })}
-                            </div>
-                          ))}
-                        </div>
-                      )}
                     </div>
                   )
                 })}

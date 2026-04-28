@@ -1047,14 +1047,14 @@ export default function Editor({ userId, resetKey, registerUndo }) {
   )
 
   if (loading) return (
-    <div className="p-4 pt-6 flex items-center justify-center h-[calc(100dvh-136px)] sm:h-[calc(100dvh-40px)]">
+    <div className="p-4 pt-6 flex items-center justify-center h-[calc(100dvh-64px)] sm:h-[calc(100dvh-40px)]">
       <span className="text-gray-600 text-sm">Loading files…</span>
     </div>
   )
 
   return (
     <div
-      className={`${fullScreen ? 'fixed inset-0 z-[60] bg-brand-bg' : 'p-3 pt-4 sm:p-4 sm:pt-6 h-[calc(100dvh-136px)] sm:h-[calc(100dvh-40px)]'} animate-fadeIn flex gap-3`}
+      className={`${fullScreen ? 'fixed inset-0 z-[60] bg-brand-bg' : 'p-3 pt-4 sm:p-4 sm:pt-6 h-[calc(100dvh-64px)] sm:h-[calc(100dvh-40px)]'} animate-fadeIn flex gap-3`}
       onContextMenu={e => {
         if (e.target === e.currentTarget)
           showCtx(e, [
