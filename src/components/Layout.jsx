@@ -18,6 +18,7 @@ const SheetsIcon = () => <svg width="22" height="22" viewBox="0 0 24 24" fill="n
 const EditorIcon = () => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
 const CloseIcon = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
 const SignOutIcon = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+const DrawerIcon = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/></svg>
 
 const TABS = ['tasks', 'affiliates', 'formulas', 'sheets', 'editor']
 const PRIMARY_TABS = [
@@ -96,11 +97,11 @@ export default function Layout({ user, activeView, setActiveView, taskStats, onU
             <div className="flex items-center gap-0.5 sm:gap-1 z-10">
               <button
                 onClick={e => { e.stopPropagation(); setShowMobileNav(v => !v); setShowFile(false); setShowSettings(false); setShowTrash(false) }}
-                className="w-7 h-7 sm:w-4 sm:h-4 rounded ml-1 sm:ml-2 mr-1 bg-brand-accent/80 flex items-center justify-center flex-shrink-0 border border-brand-accent/30 sm:pointer-events-none"
+                className="sm:hidden w-9 h-9 rounded ml-1 mr-1 bg-brand-accent/90 text-white flex items-center justify-center flex-shrink-0 border border-brand-accent/40 shadow-sm active:bg-brand-accent"
                 title="Navigation"
                 aria-label="Open navigation"
               >
-                <div className="w-2.5 h-2.5 sm:w-2 sm:h-2 rounded-sm bg-white/80" />
+                <DrawerIcon />
               </button>
 
               {/* File menu */}
