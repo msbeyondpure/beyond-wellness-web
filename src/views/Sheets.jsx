@@ -470,7 +470,7 @@ function ColumnChip({ col, mode, onPin, onUnpin, onDelete, disableUnpin, onDragS
   )
 }
 
-export default function Sheets({ userId, resetKey, registerUndo, embedded = false, focusSheetId, paneId, onActiveSheetChange }) {
+export default function Sheets({ userId, resetKey, registerUndo, embedded = false }) {
   const { sheets, loading, addSheet, addTemplateSheet, saveSheet, deleteSheet, usingLocalSheets } = useSheets(userId)
   const [localSheets, setLocalSheets] = useState([])
   const [activeId, setActiveId] = useState(null)
@@ -584,8 +584,6 @@ export default function Sheets({ userId, resetKey, registerUndo, embedded = fals
   const detailPopupRow = useMemo(() => (
     detailRowId ? visibleRows.find(row => row.id === detailRowId) || active?.rows.find(row => row.id === detailRowId) : null
   ), [active, detailRowId, visibleRows])
-  const activeSheetId = active?.id
-  const activeSheetName = active?.name
 
   const sheetMinWidth = useMemo(() => {
     if (!active) return 760
@@ -601,18 +599,6 @@ export default function Sheets({ userId, resetKey, registerUndo, embedded = fals
   useEffect(() => {
     if (active && !isBatchProductionSheet(active)) setActiveBatchProduct(null)
   }, [active])
-
-  useEffect(() => {
-    if (!focusSheetId || activeId === focusSheetId) return
-    if (!localSheets.some(sheet => sheet.id === focusSheetId)) return
-    setActiveId(focusSheetId)
-    setShowMobileSidebar(false)
-    autoSelectedRef.current = true
-  }, [activeId, focusSheetId, localSheets])
-
-  useEffect(() => {
-    if (activeSheetId) onActiveSheetChange?.(paneId, { id: activeSheetId, name: activeSheetName })
-  }, [activeSheetId, activeSheetName, onActiveSheetChange, paneId])
 
   function bumpHistory() {
     setHistoryVersion(v => v + 1)
@@ -912,16 +898,10 @@ export default function Sheets({ userId, resetKey, registerUndo, embedded = fals
   }
 
   function startSheetDrag(e, sheetId) {
-    const sheet = localSheetsRef.current.get(sheetId) || localSheets.find(item => item.id === sheetId)
     setDragSheetId(sheetId)
     e.dataTransfer.effectAllowed = 'move'
     e.dataTransfer.setData('application/x-bw-drag', 'sheet')
     e.dataTransfer.setData('text/plain', sheetId)
-    if (sheet) {
-      const payload = { view: 'sheets', sheetId, title: sheet.name }
-      e.dataTransfer.setData('application/x-bw-split', JSON.stringify(payload))
-      window.dispatchEvent(new CustomEvent('bw-split-drag-start', { detail: payload }))
-    }
   }
 
   function dropSheet(e, targetSheetId) {
@@ -1303,7 +1283,7 @@ export default function Sheets({ userId, resetKey, registerUndo, embedded = fals
                       onDragStart={e => startSheetDrag(e, sheet.id)}
                       onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move' }}
                       onDrop={e => dropSheet(e, sheet.id)}
-                      onDragEnd={() => { setDragSheetId(null); window.dispatchEvent(new CustomEvent('bw-split-drag-end')) }}
+                      onDragEnd={() => setDragSheetId(null)}
                       onClick={() => {
                         if (batchSheet) {
                           setOpenBatchSheetId(id => id === sheet.id ? null : sheet.id)
