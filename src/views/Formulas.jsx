@@ -118,7 +118,7 @@ function buildSourcingItems(sheets) {
     .sort((a, b) => String(a.name).localeCompare(String(b.name)))
 }
 
-export default function Formulas({ userId, resetKey, registerUndo }) {
+export default function Formulas({ userId, resetKey, registerUndo, embedded = false }) {
   const { formulas, loading, saveFormula, deleteFormula, addFormula } = useFormulas(userId)
   const { sheets: sourcingSheets } = useSheets(userId)
   const [activeId, setActiveId] = useState(null)
@@ -484,13 +484,13 @@ export default function Formulas({ userId, resetKey, registerUndo }) {
   )
 
   if (loading) return (
-    <div className="p-4 pt-6 animate-fadeIn flex items-center justify-center h-[calc(100dvh-64px)] sm:h-[calc(100dvh-40px)]">
+    <div className={`${embedded ? 'p-2 h-full min-h-0' : 'p-4 pt-6 h-[calc(100dvh-64px)] sm:h-[calc(100dvh-40px)]'} animate-fadeIn flex items-center justify-center`}>
       <span className="text-gray-600 text-sm">Loading formulas...</span>
     </div>
   )
 
   return (
-    <div className="p-3 pt-4 sm:p-4 sm:pt-6 animate-fadeIn h-[calc(100dvh-64px)] sm:h-[calc(100dvh-40px)] min-h-[360px]">
+    <div className={`${embedded ? 'p-2 animate-fadeIn h-full min-h-0' : 'p-3 pt-4 sm:p-4 sm:pt-6 animate-fadeIn h-[calc(100dvh-64px)] sm:h-[calc(100dvh-40px)] min-h-[360px]'}`}>
       <Toast msg={toast} />
 
       {/* Import modal */}

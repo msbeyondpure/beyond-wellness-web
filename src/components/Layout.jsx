@@ -32,7 +32,7 @@ function loadTrashTasks() {
   try { return JSON.parse(localStorage.getItem('bwTrashTasks')) || [] } catch { return [] }
 }
 
-export default function Layout({ user, activeView, setActiveView, taskStats, onUndo, onRedo, children }) {
+export default function Layout({ user, activeView, setActiveView, taskStats, onUndo, onRedo, onTabDragStart, onSplitDragEnd, children }) {
   const [showFile, setShowFile] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [showTrash, setShowTrash] = useState(false)
@@ -203,7 +203,11 @@ export default function Layout({ user, activeView, setActiveView, taskStats, onU
               {TABS.map(v => (
                 <button
                   key={v}
+                  draggable
+                  onDragStart={e => onTabDragStart?.(e, v)}
+                  onDragEnd={onSplitDragEnd}
                   onClick={() => setActiveView(v)}
+                  title="Drag tab to split"
                   className={`px-3 py-1.5 rounded font-medium text-xs transition-all ${activeView === v ? 'btn-primary text-white' : 'text-gray-400 hover:text-white hover:bg-white/10'}`}
                 >
                   {v.charAt(0).toUpperCase() + v.slice(1)}

@@ -470,7 +470,7 @@ function ColumnChip({ col, mode, onPin, onUnpin, onDelete, disableUnpin, onDragS
   )
 }
 
-export default function Sheets({ userId, resetKey, registerUndo }) {
+export default function Sheets({ userId, resetKey, registerUndo, embedded = false, focusSheetId, onActiveSheetChange }) {
   const { sheets, loading, addSheet, addTemplateSheet, saveSheet, deleteSheet, usingLocalSheets } = useSheets(userId)
   const [localSheets, setLocalSheets] = useState([])
   const [activeId, setActiveId] = useState(null)
@@ -599,6 +599,18 @@ export default function Sheets({ userId, resetKey, registerUndo }) {
   useEffect(() => {
     if (active && !isBatchProductionSheet(active)) setActiveBatchProduct(null)
   }, [active])
+
+  useEffect(() => {
+    if (!focusSheetId || activeId === focusSheetId) return
+    if (!localSheets.some(sheet => sheet.id === focusSheetId)) return
+    setActiveId(focusSheetId)
+    setShowMobileSidebar(false)
+    autoSelectedRef.current = true
+  }, [activeId, focusSheetId, localSheets])
+
+  useEffect(() => {
+    if (active) onActiveSheetChange?.({ id: active.id, name: active.name })
+  }, [active, onActiveSheetChange])
 
   function bumpHistory() {
     setHistoryVersion(v => v + 1)
@@ -876,7 +888,7 @@ export default function Sheets({ userId, resetKey, registerUndo }) {
 
   function startColumnDrag(e, colId) {
     setDragColumnId(colId)
-    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.effectAllowed = 'copyMove'
     e.dataTransfer.setData('application/x-bw-drag', 'column')
     e.dataTransfer.setData('text/plain', colId)
   }
@@ -898,10 +910,16 @@ export default function Sheets({ userId, resetKey, registerUndo }) {
   }
 
   function startSheetDrag(e, sheetId) {
+    const sheet = localSheetsRef.current.get(sheetId) || localSheets.find(item => item.id === sheetId)
     setDragSheetId(sheetId)
     e.dataTransfer.effectAllowed = 'move'
     e.dataTransfer.setData('application/x-bw-drag', 'sheet')
     e.dataTransfer.setData('text/plain', sheetId)
+    if (sheet) {
+      const payload = { view: 'sheets', sheetId, title: sheet.name }
+      e.dataTransfer.setData('application/x-bw-split', JSON.stringify(payload))
+      window.dispatchEvent(new CustomEvent('bw-split-drag-start', { detail: payload }))
+    }
   }
 
   function dropSheet(e, targetSheetId) {
@@ -1049,7 +1067,7 @@ export default function Sheets({ userId, resetKey, registerUndo }) {
   const saveLabel = usingLocalSheets ? 'local' : saveState === 'saving' ? 'saving' : saveState === 'dirty' ? 'unsaved' : saveState === 'saved' ? 'saved' : 'synced'
 
   return (
-    <div className="p-3 pt-4 sm:p-4 sm:pt-6 animate-fadeIn h-[calc(100dvh-64px)] sm:h-[calc(100dvh-40px)] min-h-[360px]">
+    <div className={`${embedded ? 'p-2 animate-fadeIn h-full min-h-0' : 'p-3 pt-4 sm:p-4 sm:pt-6 animate-fadeIn h-[calc(100dvh-64px)] sm:h-[calc(100dvh-40px)] min-h-[360px]'}`}>
       <Modal open={showImport} onClose={() => { setShowImport(false); setImportError('') }} title="Import Sheet">
         <div className="p-4 space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -1283,7 +1301,7 @@ export default function Sheets({ userId, resetKey, registerUndo }) {
                       onDragStart={e => startSheetDrag(e, sheet.id)}
                       onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move' }}
                       onDrop={e => dropSheet(e, sheet.id)}
-                      onDragEnd={() => setDragSheetId(null)}
+                      onDragEnd={() => { setDragSheetId(null); window.dispatchEvent(new CustomEvent('bw-split-drag-end')) }}
                       onClick={() => {
                         if (batchSheet) {
                           setOpenBatchSheetId(id => id === sheet.id ? null : sheet.id)
