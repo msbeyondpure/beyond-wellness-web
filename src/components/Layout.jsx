@@ -19,6 +19,7 @@ const EditorIcon = () => <svg width="22" height="22" viewBox="0 0 24 24" fill="n
 const CloseIcon = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
 const SignOutIcon = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
 const DrawerIcon = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/></svg>
+const TabSplitIcon = () => <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M12 5v14"/></svg>
 
 const TABS = ['tasks', 'affiliates', 'formulas', 'sheets', 'editor']
 const PRIMARY_TABS = [
@@ -202,17 +203,27 @@ export default function Layout({ user, activeView, setActiveView, taskStats, onU
             {/* Center: Tabs (desktop only) */}
             <div className="hidden sm:flex absolute left-1/2 -translate-x-1/2 gap-1">
               {TABS.map(v => (
-                <button
+                <div
                   key={v}
-                  draggable
-                  onDragStart={e => onTabDragStart?.(e, v)}
-                  onDragEnd={onSplitDragEnd}
-                  onClick={() => setActiveView(v)}
-                  title="Drag tab to split"
-                  className={`px-3 py-1.5 rounded font-medium text-xs transition-all ${activeView === v ? 'btn-primary text-white' : 'text-gray-400 hover:text-white hover:bg-white/10'}`}
+                  className={`group flex items-center rounded transition-all ${activeView === v ? 'btn-primary text-white' : 'text-gray-400 hover:text-white hover:bg-white/10'}`}
                 >
-                  {v.charAt(0).toUpperCase() + v.slice(1)}
-                </button>
+                  <button
+                    onClick={() => setActiveView(v)}
+                    className="px-3 py-1.5 rounded-l font-medium text-xs transition-all"
+                  >
+                    {v.charAt(0).toUpperCase() + v.slice(1)}
+                  </button>
+                  <span
+                    draggable
+                    onDragStart={e => onTabDragStart?.(e, v)}
+                    onDragEnd={onSplitDragEnd}
+                    className="self-stretch px-1.5 flex items-center cursor-grab active:cursor-grabbing opacity-70 group-hover:opacity-100"
+                    title={`Drag ${v} to split`}
+                    aria-label={`Drag ${v} to split`}
+                  >
+                    <TabSplitIcon />
+                  </span>
+                </div>
               ))}
             </div>
 

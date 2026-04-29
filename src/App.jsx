@@ -164,10 +164,18 @@ export default function App() {
 
   // Tapping the active tab resets it; tapping a different tab switches to it
   const handleTabPress = (v) => {
-    if (v === activeView && !activePane?.sheetId) {
+    clearSplitDrag()
+    const targetPaneId = panes.some(pane => pane.id === activePaneId) ? activePaneId : panes[0]?.id
+    const targetPane = panes.find(pane => pane.id === targetPaneId) || panes[0]
+
+    if (v === targetPane?.view && !targetPane?.sheetId) {
       setResetKeys(k => ({ ...k, [v]: k[v] + 1 }))
     } else {
-      setPanes(prev => prev.map(pane => pane.id === activePaneId ? { ...pane, view: v, sheetId: null, title: null } : pane))
+      setPanes(prev => {
+        if (!targetPaneId) return [makePane(v)]
+        return prev.map(pane => pane.id === targetPaneId ? { ...pane, view: v, sheetId: null, title: null } : pane)
+      })
+      if (targetPaneId) setActivePaneId(targetPaneId)
       // Clear undo state when switching views (each view re-registers on mount)
       undoRef.current = null
       redoRef.current = null
