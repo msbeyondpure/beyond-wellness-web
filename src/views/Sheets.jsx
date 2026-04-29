@@ -470,7 +470,7 @@ function ColumnChip({ col, mode, onPin, onUnpin, onDelete, disableUnpin, onDragS
   )
 }
 
-export default function Sheets({ userId, resetKey, registerUndo, embedded = false, focusSheetId, onActiveSheetChange }) {
+export default function Sheets({ userId, resetKey, registerUndo, embedded = false, focusSheetId, paneId, onActiveSheetChange }) {
   const { sheets, loading, addSheet, addTemplateSheet, saveSheet, deleteSheet, usingLocalSheets } = useSheets(userId)
   const [localSheets, setLocalSheets] = useState([])
   const [activeId, setActiveId] = useState(null)
@@ -584,6 +584,8 @@ export default function Sheets({ userId, resetKey, registerUndo, embedded = fals
   const detailPopupRow = useMemo(() => (
     detailRowId ? visibleRows.find(row => row.id === detailRowId) || active?.rows.find(row => row.id === detailRowId) : null
   ), [active, detailRowId, visibleRows])
+  const activeSheetId = active?.id
+  const activeSheetName = active?.name
 
   const sheetMinWidth = useMemo(() => {
     if (!active) return 760
@@ -609,8 +611,8 @@ export default function Sheets({ userId, resetKey, registerUndo, embedded = fals
   }, [activeId, focusSheetId, localSheets])
 
   useEffect(() => {
-    if (active) onActiveSheetChange?.({ id: active.id, name: active.name })
-  }, [active, onActiveSheetChange])
+    if (activeSheetId) onActiveSheetChange?.(paneId, { id: activeSheetId, name: activeSheetName })
+  }, [activeSheetId, activeSheetName, onActiveSheetChange, paneId])
 
   function bumpHistory() {
     setHistoryVersion(v => v + 1)

@@ -124,7 +124,7 @@ export default function App() {
     return () => document.removeEventListener('keydown', onKeyDown)
   }, [])
 
-  const handlePaneSheetChange = (paneIdForSheet, sheet) => {
+  const handlePaneSheetChange = useCallback((paneIdForSheet, sheet) => {
     if (!sheet?.id) return
     setPanes(prev => {
       let changed = false
@@ -136,7 +136,7 @@ export default function App() {
       })
       return changed ? next : prev
     })
-  }
+  }, [])
 
   function rememberSplitPayload(payload) {
     splitPayloadRef.current = payload
@@ -180,20 +180,6 @@ export default function App() {
       undoRef.current = null
       redoRef.current = null
     }
-  }
-
-  const handleTabDragStart = (event, view) => {
-    const payload = { view }
-    event.dataTransfer.effectAllowed = 'copy'
-    event.dataTransfer.setData('application/x-bw-split', JSON.stringify(payload))
-    startSplitDrag(payload)
-  }
-
-  const handleSplitDragEnd = () => {
-    if (splitPayloadRef.current && splitHoverRef.current) {
-      addSplitPane(splitPayloadRef.current, splitHoverRef.current)
-    }
-    clearSplitDrag()
   }
 
   const addSplitPane = (payload, position) => {
@@ -300,7 +286,8 @@ export default function App() {
             registerUndo={registerPaneUndo}
             embedded={embedded}
             focusSheetId={pane.sheetId}
-            onActiveSheetChange={sheet => handlePaneSheetChange(pane.id, sheet)}
+            paneId={pane.id}
+            onActiveSheetChange={handlePaneSheetChange}
           />
         )
       case 'editor':
@@ -332,8 +319,6 @@ export default function App() {
       taskStats={taskStats}
       onUndo={handleUndo}
       onRedo={handleRedo}
-      onTabDragStart={handleTabDragStart}
-      onSplitDragEnd={handleSplitDragEnd}
     >
       {panes.length === 1 ? (
         renderPaneContent(activePane, false)
