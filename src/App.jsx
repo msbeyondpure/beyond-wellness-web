@@ -77,6 +77,10 @@ function SplitDropOverlay({ show, paneCount, onDrop, onHover }) {
   )
 }
 
+function SplitIcon() {
+  return <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/></svg>
+}
+
 export default function App() {
   const { user, loading } = useUser()
   const [panes, setPanes] = useState(() => [makePane('tasks')])
@@ -92,6 +96,7 @@ export default function App() {
   const redoRef = useRef(null)
   const splitPayloadRef = useRef(null)
   const splitHoverRef = useRef(null)
+  const splitCleanupTimerRef = useRef(null)
 
   const registerUndo = useCallback((undoFn, redoFn) => {
     undoRef.current = undoFn
@@ -143,10 +148,18 @@ export default function App() {
   }
 
   function clearSplitDrag() {
+    clearTimeout(splitCleanupTimerRef.current)
     splitPayloadRef.current = null
     splitHoverRef.current = null
     setSplitDragging(false)
     setSplitPayload(null)
+  }
+
+  function startSplitDrag(payload) {
+    rememberSplitPayload(payload)
+    setSplitDragging(true)
+    clearTimeout(splitCleanupTimerRef.current)
+    splitCleanupTimerRef.current = setTimeout(clearSplitDrag, 8000)
   }
 
   // Tapping the active tab resets it; tapping a different tab switches to it
@@ -165,8 +178,7 @@ export default function App() {
     const payload = { view }
     event.dataTransfer.effectAllowed = 'copy'
     event.dataTransfer.setData('application/x-bw-split', JSON.stringify(payload))
-    rememberSplitPayload(payload)
-    setSplitDragging(true)
+    startSplitDrag(payload)
   }
 
   const handleSplitDragEnd = () => {
@@ -178,20 +190,20 @@ export default function App() {
 
   const addSplitPane = (payload, position) => {
     if (!payload?.view) return
+
     const nextPane = makePane(payload.view, {
       sheetId: payload.sheetId || null,
       title: payload.title || null,
     })
-
     setPanes(prev => {
       if (prev.length >= MAX_PANES) return prev
       const activeIndex = Math.max(0, prev.findIndex(pane => pane.id === activePaneId))
       const insertAt = position === 'left' || position === 'top' ? activeIndex : activeIndex + 1
       const next = [...prev]
       next.splice(insertAt, 0, nextPane)
-      setSplitLayout(splitLayoutFor(position, next.length))
       return next
     })
+    setSplitLayout(splitLayoutFor(position, Math.min(MAX_PANES, panes.length + 1)))
     setActivePaneId(nextPane.id)
     undoRef.current = null
     redoRef.current = null
@@ -199,8 +211,7 @@ export default function App() {
 
   useEffect(() => {
     function onSplitDragStart(event) {
-      setSplitDragging(true)
-      if (event.detail?.view) rememberSplitPayload(event.detail)
+      if (event.detail?.view) startSplitDrag(event.detail)
     }
     function onSplitDragEnd() {
       if (splitPayloadRef.current && splitHoverRef.current) {
@@ -208,13 +219,24 @@ export default function App() {
       }
       clearSplitDrag()
     }
+    function onGlobalDrop() {
+      clearSplitDrag()
+    }
     window.addEventListener('bw-split-drag-start', onSplitDragStart)
     window.addEventListener('bw-split-drag-end', onSplitDragEnd)
+    window.addEventListener('drop', onGlobalDrop)
+    window.addEventListener('dragend', onGlobalDrop)
+    window.addEventListener('blur', clearSplitDrag)
     return () => {
       window.removeEventListener('bw-split-drag-start', onSplitDragStart)
       window.removeEventListener('bw-split-drag-end', onSplitDragEnd)
+      window.removeEventListener('drop', onGlobalDrop)
+      window.removeEventListener('dragend', onGlobalDrop)
+      window.removeEventListener('blur', clearSplitDrag)
     }
   })
+
+  useEffect(() => () => clearTimeout(splitCleanupTimerRef.current), [])
 
   const handleSplitDrop = (position, event) => {
     const payload = parseSplitPayload(event) || splitPayloadRef.current || splitPayload
@@ -235,6 +257,22 @@ export default function App() {
       if (next.length < 4 && splitLayout === 'grid') setSplitLayout('columns')
       return next
     })
+  }
+
+  const splitActivePane = (position) => {
+    addSplitPane({
+      view: activePane?.view || activeView,
+      sheetId: activePane?.sheetId || null,
+      title: activePane?.title || null,
+    }, position)
+  }
+
+  const splitPane = (pane, position) => {
+    addSplitPane({
+      view: pane?.view || 'tasks',
+      sheetId: pane?.sheetId || null,
+      title: pane?.title || null,
+    }, position)
   }
 
   const renderPaneContent = (pane, embedded = false) => {
@@ -308,14 +346,26 @@ export default function App() {
                     <span className="text-xs font-semibold text-white truncate">{paneTitle(pane)}</span>
                     <span className="text-[10px] uppercase tracking-wide text-gray-600 shrink-0">{VIEW_LABELS[pane.view]}</span>
                   </div>
-                  <button
-                    onClick={event => { event.stopPropagation(); closePane(pane.id) }}
-                    className="p-1 rounded text-gray-500 hover:text-white hover:bg-white/10 transition-all"
-                    title="Close split"
-                    aria-label={`Close ${paneTitle(pane)} split`}
-                  >
-                    <ClosePaneIcon />
-                  </button>
+                  <div className="flex items-center gap-1">
+                    {panes.length < MAX_PANES && (
+                      <button
+                        onClick={event => { event.stopPropagation(); setActivePaneId(pane.id); splitPane(pane, 'right') }}
+                        className="p-1 rounded text-gray-500 hover:text-white hover:bg-white/10 transition-all"
+                        title="Split this pane right"
+                        aria-label={`Split ${paneTitle(pane)} right`}
+                      >
+                        <SplitIcon />
+                      </button>
+                    )}
+                    <button
+                      onClick={event => { event.stopPropagation(); closePane(pane.id) }}
+                      className="p-1 rounded text-gray-500 hover:text-white hover:bg-white/10 transition-all"
+                      title="Close split"
+                      aria-label={`Close ${paneTitle(pane)} split`}
+                    >
+                      <ClosePaneIcon />
+                    </button>
+                  </div>
                 </div>
                 <div className={`flex-1 min-h-0 ${scrollPane ? 'overflow-auto' : 'overflow-hidden'}`}>
                   {renderPaneContent(pane, true)}
@@ -323,6 +373,16 @@ export default function App() {
               </section>
             )
           })}
+        </div>
+      )}
+      {panes.length === 1 && (
+        <div className="hidden sm:flex fixed right-3 bottom-3 z-30 gap-1 rounded border border-white/10 bg-[#1f1f1f]/95 p-1 shadow-lg">
+          <button onClick={() => splitActivePane('right')} className="px-2 py-1.5 rounded text-xs text-gray-300 hover:text-white hover:bg-white/10 flex items-center gap-1" title="Split current view right">
+            <SplitIcon /> Right
+          </button>
+          <button onClick={() => splitActivePane('bottom')} className="px-2 py-1.5 rounded text-xs text-gray-300 hover:text-white hover:bg-white/10" title="Split current view below">
+            Bottom
+          </button>
         </div>
       )}
       <SplitDropOverlay show={splitDragging} paneCount={panes.length} onDrop={handleSplitDrop} onHover={rememberSplitHover} />
