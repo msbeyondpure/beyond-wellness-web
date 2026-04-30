@@ -37,6 +37,15 @@ function rangeIds(items, getId, startId, endId) {
   return items.slice(from, to + 1).map(getId)
 }
 
+function targetInsideSelectedItem(target, itemRefs) {
+  for (const nodes of itemRefs.current.values()) {
+    for (const node of nodes) {
+      if (node?.isConnected && node.contains(target)) return true
+    }
+  }
+  return false
+}
+
 export function useMultiSelection(items, options = {}) {
   const getId = options.getId || defaultGetId
   const enabled = options.enabled !== false
@@ -51,6 +60,19 @@ export function useMultiSelection(items, options = {}) {
 
   useEffect(() => { itemsRef.current = items }, [items])
   useEffect(() => { selectedRef.current = selectedIds }, [selectedIds])
+  useEffect(() => {
+    if (!enabled) return undefined
+    const clearFromOutsideClick = (event) => {
+      if (!selectedRef.current.size) return
+      if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey) return
+      const target = event.target
+      if (target?.closest?.('[data-selection-bar="true"]')) return
+      if (targetInsideSelectedItem(target, itemRefs)) return
+      clearSelection()
+    }
+    document.addEventListener('mousedown', clearFromOutsideClick)
+    return () => document.removeEventListener('mousedown', clearFromOutsideClick)
+  }, [clearSelection, enabled])
   useEffect(() => {
     const valid = new Set(items.map(getId))
     setSelectedIds(prev => {
