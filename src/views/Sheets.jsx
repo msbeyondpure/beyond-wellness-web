@@ -193,7 +193,7 @@ function safeSheet(sheet = {}) {
   const storedWrap = columns.find(col => typeof col.sheetWrap === 'boolean')?.sheetWrap
   const empty = blankCells(columns)
   const rows = Array.isArray(sheet.rows) ? sheet.rows : []
-  return normalizeStockCells({
+  return {
     id: sheet.id || uid(),
     name,
     columns,
@@ -205,7 +205,7 @@ function safeSheet(sheet = {}) {
     wrap: typeof sheet.wrap === 'boolean' ? sheet.wrap : storedWrap !== false,
     created_at: sheet.created_at || new Date().toISOString(),
     updated_at: sheet.updated_at || new Date().toISOString(),
-  })
+  }
 }
 
 function csvEscape(value) {
@@ -334,21 +334,7 @@ function stockColumns(sheet) {
 }
 
 function rowHasCheckedStock(sheet, row) {
-  return stockColumns(sheet).some(col => cellIsChecked(row.cells[col.id]))
-}
-
-function normalizeStockCells(sheet) {
-  const columns = stockColumns(sheet)
-  if (columns.length <= 1) return sheet
-  return {
-    ...sheet,
-    rows: sheet.rows.map(row => {
-      if (!columns.some(col => cellIsChecked(row.cells[col.id]))) return row
-      const cells = { ...row.cells }
-      columns.forEach(col => { cells[col.id] = 'TRUE' })
-      return { ...row, cells }
-    }),
-  }
+  return stockColumns(sheet).some(col => cellIsChecked(row?.cells?.[col.id]))
 }
 
 function rowHasPrimaryContent(sheet, row) {

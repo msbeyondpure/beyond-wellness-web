@@ -210,24 +210,6 @@ function truthyStock(value) {
   return ['true', 'yes', 'y', '1', 'checked', 'in stock', 'stocked'].includes(normalized)
 }
 
-function isStockColumn(col) {
-  return String(col?.name || '').trim().toLowerCase() === 'in stock'
-}
-
-function normalizeStockCells(sheet) {
-  const stockColumns = (sheet?.columns || []).filter(isStockColumn)
-  if (stockColumns.length <= 1) return sheet
-  return {
-    ...sheet,
-    rows: (sheet.rows || []).map(row => {
-      if (!stockColumns.some(col => truthyStock(row.cells?.[col.id]))) return row
-      const cells = { ...(row.cells || {}) }
-      stockColumns.forEach(col => { cells[col.id] = 'TRUE' })
-      return { ...row, cells }
-    }),
-  }
-}
-
 function stockFromInventory(values) {
   const available = parseFloat(values.Available || values['On Hand'] || '')
   if (Number.isFinite(available) && available > 0) return 'TRUE'
@@ -380,7 +362,7 @@ function normalizeSheet(sheet) {
   }
   const rows = Array.isArray(sheet.rows) ? sheet.rows : []
   const storedWrap = columns.find(col => typeof col.sheetWrap === 'boolean')?.sheetWrap
-  return normalizeStockCells({
+  return {
     id: sheet.id || uid(),
     name: sheet.name || 'Untitled Sheet',
     columns,
@@ -392,7 +374,7 @@ function normalizeSheet(sheet) {
     wrap: typeof sheet.wrap === 'boolean' ? sheet.wrap : storedWrap !== false,
     created_at: sheet.created_at || new Date().toISOString(),
     updated_at: sheet.updated_at || new Date().toISOString(),
-  })
+  }
 }
 
 function makeSheet(name = 'New Sheet') {
