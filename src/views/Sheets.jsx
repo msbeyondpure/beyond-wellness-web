@@ -69,6 +69,50 @@ function moveItem(list, sourceId, targetId) {
   return next
 }
 
+function columnLayoutSignature(sheet) {
+  return (sheet?.columns || []).map(col => `${col.id}:${col.pinned !== false ? 'main' : 'detail'}`).join('|')
+}
+
+function rowLayoutSignature(sheet) {
+  return (sheet?.rows || []).map(row => row.id).join('|')
+}
+
+function rememberLayoutNode(ref, id, node) {
+  if (!id) return
+  if (node) ref.current.set(id, node)
+  else ref.current.delete(id)
+}
+
+function captureRects(ref) {
+  return new Map([...ref.current.entries()].map(([id, node]) => [id, node.getBoundingClientRect()]))
+}
+
+function animateLayoutShift(ref, update) {
+  const before = captureRects(ref)
+  update()
+  requestAnimationFrame(() => {
+    ref.current.forEach((node, id) => {
+      const first = before.get(id)
+      if (!first) return
+      const last = node.getBoundingClientRect()
+      const dx = first.left - last.left
+      const dy = first.top - last.top
+      if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return
+      node.style.transition = 'none'
+      node.style.transform = `translate(${dx}px, ${dy}px)`
+      node.style.willChange = 'transform'
+      requestAnimationFrame(() => {
+        node.style.transition = 'transform 150ms ease'
+        node.style.transform = ''
+        window.setTimeout(() => {
+          node.style.transition = ''
+          node.style.willChange = ''
+        }, 170)
+      })
+    })
+  })
+}
+
 function loadSheetOrder() {
   try {
     const parsed = JSON.parse(localStorage.getItem(LS_SHEET_ORDER_KEY) || '[]')
@@ -435,13 +479,14 @@ function StockCell({ value, onChange, onBlur, className = '' }) {
   )
 }
 
-function ColumnChip({ col, mode, onPin, onUnpin, onDelete, disableUnpin, onDragStart, onDragOver, onDrop, onDragEnd, dragging }) {
+function ColumnChip({ col, mode, onPin, onUnpin, onDelete, disableUnpin, onDragStart, onDragOver, onDrop, onDragEnd, dragging, layoutRef }) {
   const isDetail = mode === 'detail'
   return (
     <div
+      ref={node => layoutRef?.(col.id, node)}
       draggable
       onDragStart={e => onDragStart?.(e, col.id)}
-      onDragOver={onDragOver}
+      onDragOver={e => onDragOver?.(e, col.id)}
       onDrop={e => onDrop?.(e, col.id)}
       onDragEnd={onDragEnd}
       className={`inline-flex items-center gap-1 bg-white/5 border rounded px-2 py-1 text-xs shrink-0 cursor-grab active:cursor-grabbing ${dragging ? 'border-brand-accent/50 opacity-70' : 'border-white/10'}`}
@@ -506,6 +551,10 @@ export default function Sheets({ userId, resetKey, registerUndo, embedded = fals
   const undoStackRef = useRef([])
   const redoStackRef = useRef([])
   const sidebarResizeRef = useRef(null)
+  const dragColumnRef = useRef(null)
+  const dragRowRef = useRef(null)
+  const columnLayoutRef = useRef(new Map())
+  const rowLayoutRef = useRef(new Map())
 
   useEffect(() => {
     const incoming = sheets.map(safeSheet)
@@ -862,20 +911,29 @@ export default function Sheets({ userId, resetKey, registerUndo, embedded = fals
     queueSave({ ...active, columns: active.columns.map(col => col.id === colId ? { ...col, pinned: false } : col) })
   }
 
-  function moveColumn(colId, targetColId = null, makeMain = null) {
-    if (!active || !colId) return
-    const source = active.columns.find(col => col.id === colId)
+  function movedColumnSheet(sheet, colId, targetColId = null, makeMain = null) {
+    if (!sheet || !colId) return sheet
+    const source = sheet.columns.find(col => col.id === colId)
     if (!source) return
-    if (makeMain === false && source.pinned !== false && pinnedCols.length <= 1) return
-    let columns = active.columns.map(col => (
+    const mainCount = sheet.columns.filter(isPinned).length
+    if (makeMain === false && source.pinned !== false && mainCount <= 1) return sheet
+    let columns = sheet.columns.map(col => (
       col.id === colId && typeof makeMain === 'boolean' ? { ...col, pinned: makeMain } : col
     ))
     if (targetColId && targetColId !== colId) columns = moveItem(columns, colId, targetColId)
-    queueSave({ ...active, columns })
+    const next = { ...sheet, columns }
+    return columnLayoutSignature(next) === columnLayoutSignature(sheet) ? sheet : next
   }
 
   function startColumnDrag(e, colId) {
+    if (!active) return
     setDragColumnId(colId)
+    dragColumnRef.current = {
+      colId,
+      sheetId: active.id,
+      startSheet: safeSheet(active),
+      latestSheet: safeSheet(active),
+    }
     e.dataTransfer.effectAllowed = 'copyMove'
     e.dataTransfer.setData('application/x-bw-drag', 'column')
     e.dataTransfer.setData('text/plain', colId)
@@ -886,15 +944,41 @@ export default function Sheets({ userId, resetKey, registerUndo, embedded = fals
     e.dataTransfer.dropEffect = 'move'
   }
 
+  function previewColumnDrop(e, makeMain, targetColId = null) {
+    allowColumnDrop(e)
+    const drag = dragColumnRef.current
+    if (!drag || !drag.colId) return
+    const latest = getLatestSheet(drag.sheetId)
+    if (!latest) return
+    const next = movedColumnSheet(latest, drag.colId, targetColId, makeMain)
+    if (next === latest) return
+    animateLayoutShift(columnLayoutRef, () => {
+      drag.latestSheet = setSheetLocal(next, true)
+      setSaveState('dirty')
+    })
+  }
+
+  function finishColumnDrag(save = true) {
+    const drag = dragColumnRef.current
+    setDragColumnId(null)
+    dragColumnRef.current = null
+    if (!save || !drag?.latestSheet || !drag.startSheet) return
+    if (columnLayoutSignature(drag.latestSheet) === columnLayoutSignature(drag.startSheet)) return
+    queueSave(drag.latestSheet, true, drag.startSheet)
+  }
+
   function dropColumn(e, makeMain, targetColId = null) {
     e.preventDefault()
     e.stopPropagation()
     const type = e.dataTransfer.getData('application/x-bw-drag')
     if (type && type !== 'column') return
     const colId = e.dataTransfer.getData('text/plain') || dragColumnId
-    setDragColumnId(null)
-    if (!colId) return
-    moveColumn(colId, targetColId, makeMain)
+    if (!colId) {
+      finishColumnDrag(false)
+      return
+    }
+    previewColumnDrop(e, makeMain, targetColId)
+    finishColumnDrag(true)
   }
 
   function startSheetDrag(e, sheetId) {
@@ -921,10 +1005,43 @@ export default function Sheets({ userId, resetKey, registerUndo, embedded = fals
   }
 
   function startRowDrag(e, rowId) {
+    if (!active) return
     setDragRowId(rowId)
+    dragRowRef.current = {
+      rowId,
+      sheetId: active.id,
+      startSheet: safeSheet(active),
+      latestSheet: safeSheet(active),
+    }
     e.dataTransfer.effectAllowed = 'move'
     e.dataTransfer.setData('application/x-bw-drag', 'row')
     e.dataTransfer.setData('text/plain', rowId)
+  }
+
+  function previewRowDrop(e, targetRowId) {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    const drag = dragRowRef.current
+    if (!drag || !drag.rowId || drag.rowId === targetRowId) return
+    const latest = getLatestSheet(drag.sheetId)
+    if (!latest) return
+    const rows = moveItem(latest.rows, drag.rowId, targetRowId)
+    if (rows === latest.rows) return
+    const next = { ...latest, rows }
+    if (rowLayoutSignature(next) === rowLayoutSignature(latest)) return
+    animateLayoutShift(rowLayoutRef, () => {
+      drag.latestSheet = setSheetLocal(next, true)
+      setSaveState('dirty')
+    })
+  }
+
+  function finishRowDrag(save = true) {
+    const drag = dragRowRef.current
+    setDragRowId(null)
+    dragRowRef.current = null
+    if (!save || !drag?.latestSheet || !drag.startSheet) return
+    if (rowLayoutSignature(drag.latestSheet) === rowLayoutSignature(drag.startSheet)) return
+    queueSave(drag.latestSheet, true, drag.startSheet)
   }
 
   function dropRow(e, targetRowId) {
@@ -933,9 +1050,12 @@ export default function Sheets({ userId, resetKey, registerUndo, embedded = fals
     const type = e.dataTransfer.getData('application/x-bw-drag')
     if (type && type !== 'row') return
     const rowId = e.dataTransfer.getData('text/plain') || dragRowId
-    setDragRowId(null)
-    if (!active || !rowId || !targetRowId || rowId === targetRowId) return
-    queueSave({ ...active, rows: moveItem(active.rows, rowId, targetRowId) })
+    if (!active || !rowId || !targetRowId) {
+      finishRowDrag(false)
+      return
+    }
+    previewRowDrop(e, targetRowId)
+    finishRowDrag(true)
   }
 
   function startColumnResize(e, col) {
@@ -1095,7 +1215,7 @@ export default function Sheets({ userId, resetKey, registerUndo, embedded = fals
             </div>
             <div
               className="flex flex-wrap gap-2 min-h-[36px]"
-              onDragOver={allowColumnDrop}
+              onDragOver={e => previewColumnDrop(e, true)}
               onDrop={e => dropColumn(e, true)}
             >
               {pinnedCols.map(col => (
@@ -1108,10 +1228,11 @@ export default function Sheets({ userId, resetKey, registerUndo, embedded = fals
                   onDelete={deleteColumn}
                   disableUnpin={pinnedCols.length <= 1}
                   onDragStart={startColumnDrag}
-                  onDragOver={allowColumnDrop}
+                  onDragOver={(e, targetId) => previewColumnDrop(e, true, targetId)}
                   onDrop={(e, targetId) => dropColumn(e, true, targetId)}
-                  onDragEnd={() => setDragColumnId(null)}
+                  onDragEnd={() => finishColumnDrag(true)}
                   dragging={dragColumnId === col.id}
+                  layoutRef={(id, node) => rememberLayoutNode(columnLayoutRef, id, node)}
                 />
               ))}
             </div>
@@ -1124,7 +1245,7 @@ export default function Sheets({ userId, resetKey, registerUndo, embedded = fals
             </div>
             <div
               className="flex flex-wrap gap-2 min-h-[36px]"
-              onDragOver={allowColumnDrop}
+              onDragOver={e => previewColumnDrop(e, false)}
               onDrop={e => dropColumn(e, false)}
             >
               {detailCols.length ? detailCols.map(col => (
@@ -1136,10 +1257,11 @@ export default function Sheets({ userId, resetKey, registerUndo, embedded = fals
                   onUnpin={unpinColumn}
                   onDelete={deleteColumn}
                   onDragStart={startColumnDrag}
-                  onDragOver={allowColumnDrop}
+                  onDragOver={(e, targetId) => previewColumnDrop(e, false, targetId)}
                   onDrop={(e, targetId) => dropColumn(e, false, targetId)}
-                  onDragEnd={() => setDragColumnId(null)}
+                  onDragEnd={() => finishColumnDrag(true)}
                   dragging={dragColumnId === col.id}
+                  layoutRef={(id, node) => rememberLayoutNode(columnLayoutRef, id, node)}
                 />
               )) : (
                 <p className="text-xs text-gray-600 py-2">No popup-only fields yet.</p>
@@ -1158,11 +1280,12 @@ export default function Sheets({ userId, resetKey, registerUndo, embedded = fals
           {detailCols.length ? detailCols.map(col => (
             <div
               key={col.id}
+              ref={node => rememberLayoutNode(columnLayoutRef, col.id, node)}
               draggable
               onDragStart={e => startColumnDrag(e, col.id)}
-              onDragOver={allowColumnDrop}
+              onDragOver={e => previewColumnDrop(e, false, col.id)}
               onDrop={e => dropColumn(e, false, col.id)}
-              onDragEnd={() => setDragColumnId(null)}
+              onDragEnd={() => finishColumnDrag(true)}
               className={`min-w-0 bg-black/10 border rounded p-2 cursor-grab active:cursor-grabbing ${dragColumnId === col.id ? 'border-brand-accent/50 opacity-80' : 'border-white/5'}`}
               title="Drag to reorder popup details"
             >
@@ -1373,7 +1496,7 @@ export default function Sheets({ userId, resetKey, registerUndo, embedded = fals
                 ) : (
                   <h2
                     onClick={() => { setNameDraft(active.name); setEditingName(true) }}
-                    onDragOver={dragColumnId ? allowColumnDrop : undefined}
+                    onDragOver={dragColumnId ? e => previewColumnDrop(e, false) : undefined}
                     onDrop={dragColumnId ? e => dropColumn(e, false) : undefined}
                     className={`text-base sm:text-lg font-semibold text-white cursor-pointer transition-colors flex items-center gap-2 select-none truncate min-w-0 flex-1 rounded px-1 -mx-1 ${dragColumnId ? 'border border-dashed border-brand-accent/40 bg-brand-accent/5 text-brand-accent' : 'border border-transparent hover:text-brand-accent'}`}
                     title={dragColumnId ? 'Drop column here to move it into row details' : 'Rename'}
@@ -1433,7 +1556,7 @@ export default function Sheets({ userId, resetKey, registerUndo, embedded = fals
 
               <div
                 className="mb-2 shrink-0 rounded border border-white/10 bg-white/[0.035] px-2 py-2 flex items-center gap-2 overflow-x-auto scrollbar-hide"
-                onDragOver={allowColumnDrop}
+                onDragOver={e => previewColumnDrop(e, false)}
                 onDrop={e => dropColumn(e, false)}
               >
                 <span className="text-[11px] font-semibold uppercase tracking-wide text-white shrink-0">Details</span>
@@ -1446,10 +1569,11 @@ export default function Sheets({ userId, resetKey, registerUndo, embedded = fals
                     onUnpin={unpinColumn}
                     onDelete={deleteColumn}
                     onDragStart={startColumnDrag}
-                    onDragOver={allowColumnDrop}
+                    onDragOver={(e, targetId) => previewColumnDrop(e, false, targetId)}
                     onDrop={(e, targetId) => dropColumn(e, false, targetId)}
-                    onDragEnd={() => setDragColumnId(null)}
+                    onDragEnd={() => finishColumnDrag(true)}
                     dragging={dragColumnId === col.id}
+                    layoutRef={(id, node) => rememberLayoutNode(columnLayoutRef, id, node)}
                   />
                 )) : (
                   <span className="text-xs text-gray-500 shrink-0">Drag columns here to keep them in the row popup.</span>
@@ -1462,18 +1586,19 @@ export default function Sheets({ userId, resetKey, registerUndo, embedded = fals
                   <div
                     className="grid gap-1 pb-2 border-b border-white/10 sticky top-0 z-10 bg-[#1f1f1f]"
                     style={{ gridTemplateColumns: gridTemplate }}
-                    onDragOver={allowColumnDrop}
+                    onDragOver={e => previewColumnDrop(e, true)}
                     onDrop={e => dropColumn(e, true)}
                   >
                     <div className="text-[11px] text-gray-600 uppercase tracking-wider px-1 py-2">#</div>
                     {pinnedCols.map(col => (
                       <div
                         key={col.id}
+                        ref={node => rememberLayoutNode(columnLayoutRef, col.id, node)}
                         draggable
                         onDragStart={e => startColumnDrag(e, col.id)}
-                        onDragOver={allowColumnDrop}
+                        onDragOver={e => previewColumnDrop(e, true, col.id)}
                         onDrop={e => dropColumn(e, true, col.id)}
-                        onDragEnd={() => setDragColumnId(null)}
+                        onDragEnd={() => finishColumnDrag(true)}
                         onDoubleClick={() => cycleColumnWrap(col.id)}
                         className={`group flex items-stretch gap-1 px-1 min-w-0 cursor-grab active:cursor-grabbing rounded border ${dragColumnId === col.id ? 'border-brand-accent/50 bg-brand-accent/5 opacity-80' : 'border-transparent'}`}
                         title="Drag to reorder. Drag to Details to move into row popup. Double-click to pin wrap."
@@ -1524,17 +1649,17 @@ export default function Sheets({ userId, resetKey, registerUndo, embedded = fals
                     const outOfStock = rowIsOutOfStock(active, row)
                     const rowPixels = rowHeight(row)
                     return (
-                      <div key={row.id}>
+                      <div key={row.id} ref={node => rememberLayoutNode(rowLayoutRef, row.id, node)}>
                         <div
                           className={`relative grid gap-1 border-b hover:bg-white/[0.025] rounded-sm ${dragRowId === row.id ? 'ring-1 ring-brand-accent/50 bg-brand-accent/[0.04]' : ''} ${outOfStock ? 'border-red-500/50 ring-1 ring-red-500/35 bg-red-500/[0.035]' : 'border-white/5'}`}
                           style={{ gridTemplateColumns: gridTemplate, minHeight: rowPixels }}
+                          onDragOver={e => previewRowDrop(e, row.id)}
+                          onDrop={e => dropRow(e, row.id)}
                         >
                           <div
                             draggable
                             onDragStart={e => startRowDrag(e, row.id)}
-                            onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move' }}
-                            onDrop={e => dropRow(e, row.id)}
-                            onDragEnd={() => setDragRowId(null)}
+                            onDragEnd={() => finishRowDrag(true)}
                             className="text-xs text-gray-600 px-1 py-2 select-none cursor-grab active:cursor-grabbing h-full flex items-start"
                             title="Drag to reorder row"
                             aria-label={`Move row ${rowIndex + 1}`}
