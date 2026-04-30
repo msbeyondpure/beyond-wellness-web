@@ -70,13 +70,109 @@ function formulaSnapshot(f) {
   return { name: normalized.name, ingredients: JSON.parse(JSON.stringify(normalized.ingredients || [])), target_cost: normalized.target_cost || '', target_margin: normalized.target_margin || '', notes: normalized.notes || '' }
 }
 
-function sourceCell(sheet, row, names) {
+const SOURCING_SHEET_NAME_KEYS = [
+  MASTER_SOURCING_SHEET_NAME,
+  LEGACY_INVENTORY_SHEET_NAME,
+].map(compactLabel)
+
+const PRIMARY_SOURCE_NAME_COLUMNS = [
+  'Ingredient',
+  'Ingredient Name',
+  'Item Name',
+  'Component',
+  'Component Name',
+  'Material',
+  'Material Name',
+  'Name',
+]
+
+const FALLBACK_SOURCE_NAME_COLUMNS = [
+  'Inventory Category',
+  'Item Type',
+  'Category',
+  'Function',
+  'Product Fit',
+  'SKU / Lot',
+  'SKU',
+  'Lot',
+]
+
+const SUPPORTING_SOURCE_COLUMNS = [
+  'Preferred Source',
+  'Best Source',
+  'Preferred Supplier',
+  'Supplier',
+  'Preferred Link',
+  'Best Source Link',
+  'Supplier Link',
+  'Backup Source',
+  'Backup Link',
+  'Link',
+  'URL',
+  'MOQ',
+  'Unit Price',
+  'Price',
+  'Unit Cost',
+  'Ingredient Cost / Unit',
+  'Shipping Cost',
+  'Lead Time',
+  'Certs / COA',
+  'COA On File',
+  'Compliance Notes',
+  'Last Quote',
+  'SKU / Lot',
+  'Location',
+  'On Hand',
+  'Allocated',
+  'Available',
+  'Reorder Point',
+  'Reorder Qty',
+  'Supplier Lead Time',
+  'Last Count Date',
+  'Expiry / Retest Date',
+  'Notes',
+]
+
+function compactLabel(value) {
+  return String(value || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '')
+}
+
+function normalizedLabel(value) {
+  return String(value || '').trim().toLowerCase()
+}
+
+function isSourcingSheet(sheet) {
+  const nameKey = compactLabel(sheet?.name)
+  return SOURCING_SHEET_NAME_KEYS.includes(nameKey) || (nameKey.includes('master') && nameKey.includes('sourcing'))
+}
+
+function findSourceColumn(sheet, names) {
+  const columns = sheet.columns || []
+  const exact = new Map(columns.map(col => [normalizedLabel(col.name), col]))
+  const compact = new Map(columns.map(col => [compactLabel(col.name), col]))
+
   for (const name of names) {
-    const column = sheet.columns?.find(col => col.name.toLowerCase() === name.toLowerCase())
-    const value = column ? row.cells?.[column.id] : ''
-    if (String(value || '').trim()) return value
+    const exactMatch = exact.get(normalizedLabel(name))
+    if (exactMatch) return exactMatch
+    const compactMatch = compact.get(compactLabel(name))
+    if (compactMatch) return compactMatch
   }
-  return ''
+  return null
+}
+
+function sourceCell(sheet, row, names) {
+  const column = findSourceColumn(sheet, names)
+  const value = column ? row.cells?.[column.id] : ''
+  return String(value || '').trim() ? value : ''
+}
+
+function sourceDisplayName(sheet, row) {
+  const primary = sourceCell(sheet, row, PRIMARY_SOURCE_NAME_COLUMNS)
+  if (String(primary || '').trim()) return primary
+
+  const fallback = sourceCell(sheet, row, FALLBACK_SOURCE_NAME_COLUMNS)
+  const hasSupportingData = SUPPORTING_SOURCE_COLUMNS.some(name => String(sourceCell(sheet, row, [name]) || '').trim())
+  return hasSupportingData ? fallback : ''
 }
 
 function buildSourceNotes(item) {
@@ -94,24 +190,24 @@ function buildSourceNotes(item) {
 
 function buildSourcingItems(sheets) {
   return sheets
-    .filter(sheet => [MASTER_SOURCING_SHEET_NAME, LEGACY_INVENTORY_SHEET_NAME].includes(sheet.name))
+    .filter(isSourcingSheet)
     .flatMap(sheet => (sheet.rows || []).map(row => {
-      const name = sourceCell(sheet, row, ['Ingredient', 'Item Name', 'Component', 'Name'])
+      const name = sourceDisplayName(sheet, row)
       if (!String(name || '').trim()) return null
       const item = {
         key: `${sheet.id}:${row.id}`,
         sheetName: sheet.name,
-        name,
-        category: sourceCell(sheet, row, ['Inventory Category', 'Item Type', 'Function']),
-        source: sourceCell(sheet, row, ['Preferred Source', 'Preferred Supplier', 'Supplier']),
-        link: sourceCell(sheet, row, ['Preferred Link', 'Supplier Link', 'Backup Link', 'Link']),
-        unitPrice: sourceCell(sheet, row, ['Unit Price', 'Unit Cost', 'Ingredient Cost / Unit']),
-        onHand: sourceCell(sheet, row, ['On Hand', 'Available']),
+        name: String(name).trim(),
+        category: sourceCell(sheet, row, ['Inventory Category', 'Item Type', 'Category', 'Function', 'Product Fit']),
+        source: sourceCell(sheet, row, ['Preferred Source', 'Best Source', 'Preferred Supplier', 'Supplier']),
+        link: sourceCell(sheet, row, ['Preferred Link', 'Best Source Link', 'Supplier Link', 'Backup Link', 'Link', 'URL']),
+        unitPrice: sourceCell(sheet, row, ['Unit Price', 'Price', 'Unit Cost', 'Ingredient Cost / Unit', 'Cost']),
+        onHand: sourceCell(sheet, row, ['Available', 'On Hand', 'Current Stock', 'Qty On Hand']),
         unit: sourceCell(sheet, row, ['Unit']),
         reorderPoint: sourceCell(sheet, row, ['Reorder Point']),
         inStock: sourceCell(sheet, row, ['IN STOCK']),
         status: sourceCell(sheet, row, ['Status', 'Reorder Status']),
-        notes: sourceCell(sheet, row, ['Notes', 'Compliance Notes']),
+        notes: sourceCell(sheet, row, ['Notes', 'Compliance Notes', 'Certs / COA', 'COA On File']),
       }
       return { ...item, notesPreview: buildSourceNotes(item) }
     }).filter(Boolean))
@@ -536,13 +632,16 @@ export default function Formulas({ userId, resetKey, registerUndo, embedded = fa
               </button>
             </div>
             <div className="p-4 overflow-y-auto">
-              <label className="text-xs text-gray-500 block mb-1">Inventory / Master Sourcing Item</label>
+              <label className="text-xs text-gray-500 block mb-1">Master Sourcing Item</label>
               <select
                 value={selectedIngredient.sourcingItemId || ''}
                 onChange={e => selectSourcingItem(e.target.value)}
                 className="w-full bg-brand-dark border border-white/10 rounded px-3 py-2 text-sm text-white outline-none focus:border-brand-accent/40"
               >
                 <option value="">No linked sourcing item</option>
+                {!sourcingItems.length && (
+                  <option value="" disabled>No selectable Master Sourcing rows found</option>
+                )}
                 {sourcingItems.map(item => (
                   <option key={item.key} value={item.key}>
                     {item.name}{item.category ? ` - ${item.category}` : ''}{item.inStock ? ' - in stock' : ''}
