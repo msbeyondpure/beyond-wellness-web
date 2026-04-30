@@ -333,9 +333,9 @@ function rowHasPrimaryContent(sheet, row) {
 }
 
 function rowIsOutOfStock(sheet, row) {
-  const stockColumn = columnByName(sheet, 'IN STOCK')
-  if (!stockColumn || !rowHasPrimaryContent(sheet, row)) return false
-  return !cellIsChecked(row.cells[stockColumn.id])
+  const stockColumns = (sheet?.columns || []).filter(isStockColumn)
+  if (!stockColumns.length || !rowHasPrimaryContent(sheet, row)) return false
+  return !stockColumns.some(col => cellIsChecked(row.cells[col.id]))
 }
 
 function rowHeight(row) {
