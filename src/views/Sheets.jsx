@@ -193,7 +193,7 @@ function safeSheet(sheet = {}) {
   const storedWrap = columns.find(col => typeof col.sheetWrap === 'boolean')?.sheetWrap
   const empty = blankCells(columns)
   const rows = Array.isArray(sheet.rows) ? sheet.rows : []
-  return {
+  return normalizeStockCells({
     id: sheet.id || uid(),
     name,
     columns,
@@ -205,7 +205,7 @@ function safeSheet(sheet = {}) {
     wrap: typeof sheet.wrap === 'boolean' ? sheet.wrap : storedWrap !== false,
     created_at: sheet.created_at || new Date().toISOString(),
     updated_at: sheet.updated_at || new Date().toISOString(),
-  }
+  })
 }
 
 function csvEscape(value) {
@@ -311,8 +311,10 @@ function loadSidebarW() {
 }
 
 function extractUrl(value) {
-  const match = String(value || '').match(/https?:\/\/[^\s"<>]+/)
-  return match ? match[0].replace(/[.,;!?)]$/, '') : null
+  const match = String(value || '').match(/(?:https?:\/\/|www\.)[^\s"<>]+/i)
+  if (!match) return null
+  const url = match[0].replace(/[.,;!?)]$/, '')
+  return url.toLowerCase().startsWith('www.') ? `https://${url}` : url
 }
 
 function isPinned(col) {
@@ -327,15 +329,42 @@ function cellIsChecked(value) {
   return ['true', 'yes', 'y', '1', 'checked', 'in stock', 'stocked'].includes(String(value || '').trim().toLowerCase())
 }
 
+function stockColumns(sheet) {
+  return (sheet?.columns || []).filter(isStockColumn)
+}
+
+function rowHasCheckedStock(sheet, row) {
+  return stockColumns(sheet).some(col => cellIsChecked(row.cells[col.id]))
+}
+
+function normalizeStockCells(sheet) {
+  const columns = stockColumns(sheet)
+  if (columns.length <= 1) return sheet
+  return {
+    ...sheet,
+    rows: sheet.rows.map(row => {
+      if (!columns.some(col => cellIsChecked(row.cells[col.id]))) return row
+      const cells = { ...row.cells }
+      columns.forEach(col => { cells[col.id] = 'TRUE' })
+      return { ...row, cells }
+    }),
+  }
+}
+
 function rowHasPrimaryContent(sheet, row) {
   return ['Ingredient', 'Item Name', 'Component', 'Product', 'Name']
     .some(name => String(cellByName(sheet, row, name) || '').trim())
 }
 
 function rowIsOutOfStock(sheet, row) {
-  const stockColumns = (sheet?.columns || []).filter(isStockColumn)
-  if (!stockColumns.length || !rowHasPrimaryContent(sheet, row)) return false
-  return !stockColumns.some(col => cellIsChecked(row.cells[col.id]))
+  if (!stockColumns(sheet).length || !rowHasPrimaryContent(sheet, row)) return false
+  return !rowHasCheckedStock(sheet, row)
+}
+
+function outOfStockStyle(enabled) {
+  return enabled
+    ? { boxShadow: 'inset 0 0 0 1px rgba(239, 68, 68, 0.42), inset 3px 0 0 rgba(239, 68, 68, 0.85)' }
+    : undefined
 }
 
 function rowHeight(row) {
@@ -835,7 +864,16 @@ export default function Sheets({ userId, resetKey, registerUndo, embedded = fals
   }
 
   function updateStockCell(rowId, colId, value) {
-    updateCell(rowId, colId, value)
+    if (!active) return
+    const stockIds = stockColumns(active).map(col => col.id)
+    const targetIds = stockIds.length ? stockIds : [colId]
+    const rows = active.rows.map(row => {
+      if (row.id !== rowId) return row
+      const cells = { ...row.cells }
+      targetIds.forEach(id => { cells[id] = value })
+      return { ...row, cells }
+    })
+    queueSave({ ...active, rows })
   }
 
   function renderSheetCell(row, col, options = {}) {
@@ -843,7 +881,7 @@ export default function Sheets({ userId, resetKey, registerUndo, embedded = fals
     if (isStockColumn(col)) {
       return (
         <StockCell
-          value={row.cells[col.id] || ''}
+          value={rowHasCheckedStock(active, row) ? 'TRUE' : (row.cells[col.id] || '')}
           onChange={value => updateStockCell(row.id, col.id, value)}
           onBlur={() => saveSheetNow(active.id)}
           className={className}
@@ -1796,6 +1834,7 @@ export default function Sheets({ userId, resetKey, registerUndo, embedded = fals
 
                   {visibleRows.map((row, rowIndex) => {
                     const outOfStock = rowIsOutOfStock(active, row)
+                    const selected = rowSelection.isSelected(row.id)
                     const rowPixels = rowHeight(row)
                     return (
                       <div
@@ -1806,8 +1845,8 @@ export default function Sheets({ userId, resetKey, registerUndo, embedded = fals
                         }}
                       >
                         <div
-                          className={`relative grid gap-1 border-b hover:bg-white/[0.025] rounded-sm ${rowSelection.isSelected(row.id) ? 'ring-1 ring-brand-accent/70 bg-brand-accent/[0.06]' : ''} ${dragRowId === row.id ? 'ring-1 ring-brand-accent/50 bg-brand-accent/[0.04]' : ''} ${outOfStock ? 'border-red-500/50 ring-1 ring-red-500/35 bg-red-500/[0.035]' : 'border-white/5'}`}
-                          style={{ gridTemplateColumns: gridTemplate, minHeight: rowPixels }}
+                          className={`relative grid gap-1 border-b hover:bg-white/[0.025] rounded-sm ${selected ? 'ring-1 ring-brand-accent/70 bg-brand-accent/[0.06]' : ''} ${dragRowId === row.id ? 'ring-1 ring-brand-accent/50 bg-brand-accent/[0.04]' : ''} ${outOfStock ? 'border-white/5 bg-red-500/[0.035]' : 'border-white/5'}`}
+                          style={{ gridTemplateColumns: gridTemplate, minHeight: rowPixels, ...outOfStockStyle(outOfStock && !selected) }}
                           onDragOver={e => previewRowDrop(e, row.id)}
                           onDrop={e => dropRow(e, row.id)}
                         >
@@ -1867,6 +1906,7 @@ export default function Sheets({ userId, resetKey, registerUndo, embedded = fals
               <div className="sm:hidden flex-1 overflow-y-auto min-h-0 space-y-3 pr-0.5" style={{ WebkitOverflowScrolling: 'touch' }}>
                 {visibleRows.map((row, rowIndex) => {
                   const outOfStock = rowIsOutOfStock(active, row)
+                  const selected = rowSelection.isSelected(row.id)
                   return (
                     <div
                       key={row.id}
@@ -1876,7 +1916,8 @@ export default function Sheets({ userId, resetKey, registerUndo, embedded = fals
                         columnSelection.clearSelection()
                         rowSelection.handleItemClick(e, row)
                       }}
-                      className={`bg-white/[0.04] border rounded-lg p-3 ${rowSelection.isSelected(row.id) ? 'border-brand-accent/70 ring-1 ring-brand-accent/60 bg-brand-accent/10' : outOfStock ? 'border-red-500/60 ring-1 ring-red-500/35 bg-red-500/[0.04]' : 'border-white/10'}`}
+                      className={`bg-white/[0.04] border rounded-lg p-3 ${selected ? 'border-brand-accent/70 ring-1 ring-brand-accent/60 bg-brand-accent/10' : outOfStock ? 'border-white/10 bg-red-500/[0.04]' : 'border-white/10'}`}
+                      style={outOfStockStyle(outOfStock && !selected)}
                     >
                       <div className="flex items-center justify-between gap-2">
                         <button
