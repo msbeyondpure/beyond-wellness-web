@@ -2,6 +2,8 @@
 import { useState, useMemo, useEffect } from 'react'
 import { useAffiliates } from '../hooks/useAffiliates'
 import { useOutreach } from '../hooks/useOutreach'
+import SelectionBar from '../components/SelectionBar'
+import { copyToClipboard, isEditingTarget, useMultiSelection } from '../hooks/useMultiSelection'
 
 const Plus = () => <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
 const Trash = () => <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
@@ -102,6 +104,13 @@ export default function Affiliates({ userId, resetKey }) {
 
   const sortedOutreach = useMemo(() => sortData(contacts, outreachSort), [contacts, outreachSort])
   const sortedAffiliates = useMemo(() => sortData(affiliates, affiliateSort), [affiliates, affiliateSort])
+  const activeRecords = useMemo(() => tab === 'outreach' ? sortedOutreach : sortedAffiliates, [tab, sortedOutreach, sortedAffiliates])
+  const recordSelection = useMultiSelection(activeRecords)
+  const clearRecordSelection = recordSelection.clearSelection
+
+  useEffect(() => {
+    clearRecordSelection()
+  }, [tab, resetKey, clearRecordSelection])
 
   const totalSales = affiliates.reduce((s, a) => s + (parseFloat(a.total_sales) || 0), 0)
   const totalCommission = affiliates.reduce((s, a) => s + (parseFloat(a.commission) || 0), 0)
@@ -156,10 +165,76 @@ export default function Affiliates({ userId, resetKey }) {
     return 'bg-gray-500/20 text-gray-400'
   }
 
+  function selectedRecordText() {
+    if (tab === 'outreach') {
+      const header = 'Name\tPlatform\tHandle\tEmail\tDate Contacted\tResponse\tNotes'
+      const rows = recordSelection.selectedItems.map(item => [
+        item.name, item.platform, item.handle, item.email, item.date_contacted, item.response, item.notes,
+      ].map(value => String(value ?? '').replace(/\s+/g, ' ').trim()).join('\t'))
+      return [header, ...rows].join('\n')
+    }
+    const header = 'Name\tPlatform\tHandle\tEmail\tCode\tStatus\tTotal Sales\tCommission\tNotes'
+    const rows = recordSelection.selectedItems.map(item => [
+      item.name, item.platform, item.handle, item.email, item.code, item.status, item.total_sales, item.commission, item.notes,
+    ].map(value => String(value ?? '').replace(/\s+/g, ' ').trim()).join('\t'))
+    return [header, ...rows].join('\n')
+  }
+
+  function copySelectedRecords() {
+    if (recordSelection.selectedCount) copyToClipboard(selectedRecordText())
+  }
+
+  function deleteSelectedRecords() {
+    if (!recordSelection.selectedCount) return
+    const label = tab === 'outreach' ? 'contact' : 'affiliate'
+    if (!confirm(`Delete ${recordSelection.selectedCount} selected ${label}${recordSelection.selectedCount === 1 ? '' : 's'}?`)) return
+    if (tab === 'outreach') recordSelection.selectedItems.forEach(item => deleteContact(item.id))
+    else recordSelection.selectedItems.forEach(item => deleteAffiliate(item.id))
+    recordSelection.clearSelection()
+  }
+
+  function markSelectedContacted(contacted) {
+    const today = new Date().toISOString().split('T')[0]
+    recordSelection.selectedItems.forEach(item => {
+      updateContact(item.id, { contacted, date_contacted: contacted ? (item.date_contacted || today) : item.date_contacted })
+    })
+  }
+
+  function setSelectedAffiliateStatus(status) {
+    recordSelection.selectedItems.forEach(item => updateAffiliate(item.id, { status }))
+  }
+
+  useEffect(() => {
+    const fn = (e) => {
+      if (isEditingTarget(e.target)) return
+      const mod = e.ctrlKey || e.metaKey
+      const key = e.key.toLowerCase()
+      if (mod && key === 'a') {
+        e.preventDefault()
+        recordSelection.selectAll(activeRecords)
+      } else if (mod && key === 'c' && recordSelection.selectedCount) {
+        e.preventDefault()
+        copySelectedRecords()
+      } else if (e.key === 'Escape' && recordSelection.selectedCount) {
+        recordSelection.clearSelection()
+      } else if ((e.key === 'Delete' || e.key === 'Backspace') && recordSelection.selectedCount) {
+        e.preventDefault()
+        deleteSelectedRecords()
+      }
+    }
+    window.addEventListener('keydown', fn)
+    return () => window.removeEventListener('keydown', fn)
+  })
+
   return (
     <div className="p-3 pt-4 sm:p-4 sm:pt-6 animate-fadeIn">
       <div className="max-w-6xl mx-auto">
-        <div className="affiliates-section glass-card rounded p-3 sm:p-5">
+        <div
+          ref={recordSelection.containerRef}
+          onMouseDown={recordSelection.handleSurfaceMouseDown}
+          className="affiliates-section glass-card rounded p-3 sm:p-5 relative"
+        >
+          {recordSelection.selectionBox}
 
           {/* Tabs */}
           <div className="flex gap-2 mb-4 sm:mb-5 border-b border-white/10">
@@ -175,6 +250,25 @@ export default function Affiliates({ userId, resetKey }) {
               </button>
             ))}
           </div>
+
+          <SelectionBar
+            count={recordSelection.selectedCount}
+            label={tab === 'outreach' ? 'contact' : 'affiliate'}
+            onClear={recordSelection.clearSelection}
+            actions={tab === 'outreach'
+              ? [
+                { label: 'Copy', onClick: copySelectedRecords },
+                { label: 'Contacted', onClick: () => markSelectedContacted(true) },
+                { label: 'Not Contacted', onClick: () => markSelectedContacted(false) },
+                { label: 'Delete', danger: true, onClick: deleteSelectedRecords },
+              ]
+              : [
+                { label: 'Copy', onClick: copySelectedRecords },
+                { label: 'Active', onClick: () => setSelectedAffiliateStatus('Active') },
+                { label: 'Pending', onClick: () => setSelectedAffiliateStatus('Pending') },
+                { label: 'Delete', danger: true, onClick: deleteSelectedRecords },
+              ]}
+          />
 
           {/* ── Outreach Tab ── */}
           {tab === 'outreach' && (
@@ -246,7 +340,12 @@ export default function Affiliates({ userId, resetKey }) {
                     ) : sortedOutreach.length === 0 ? (
                       <tr><td colSpan="6" className="text-center py-8 text-gray-500 text-sm">No outreach yet — click Add to get started</td></tr>
                     ) : sortedOutreach.map(item => (
-                      <tr key={item.id} className="border-b border-white/5 hover:bg-white/5 cursor-pointer transition-all" onClick={() => openEditOutreach(item)}>
+                      <tr
+                        key={item.id}
+                        ref={recordSelection.itemRef(item.id)}
+                        className={`border-b border-white/5 hover:bg-white/5 cursor-pointer transition-all ${recordSelection.isSelected(item.id) ? 'bg-brand-accent/10 outline outline-1 outline-brand-accent/45' : ''}`}
+                        onClick={e => recordSelection.handleItemClick(e, item, () => openEditOutreach(item))}
+                      >
                         <td className="py-2 px-3 text-white text-sm">
                           <span className="flex items-center">
                             {item.name}
@@ -291,7 +390,12 @@ export default function Affiliates({ userId, resetKey }) {
                     <p className="text-xs mt-1 text-gray-600">Tap <span className="text-brand-accent">Add</span> to get started</p>
                   </div>
                 ) : sortedOutreach.map(item => (
-                  <div key={item.id} className="mobile-card" onClick={() => openEditOutreach(item)}>
+                  <div
+                    key={item.id}
+                    ref={recordSelection.itemRef(item.id)}
+                    className={`mobile-card ${recordSelection.isSelected(item.id) ? 'ring-1 ring-brand-accent/70 bg-brand-accent/10' : ''}`}
+                    onClick={e => recordSelection.handleItemClick(e, item, () => openEditOutreach(item))}
+                  >
                     <div className="flex items-start justify-between mb-1.5">
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center text-white text-sm font-medium">
@@ -464,7 +568,12 @@ export default function Affiliates({ userId, resetKey }) {
                     ) : sortedAffiliates.length === 0 ? (
                       <tr><td colSpan="8" className="text-center py-8 text-gray-500 text-sm">No affiliates yet — click Add to get started</td></tr>
                     ) : sortedAffiliates.map(item => (
-                      <tr key={item.id} className="border-b border-white/5 hover:bg-white/5 cursor-pointer transition-all" onClick={() => setSelectedAffiliate(item)}>
+                      <tr
+                        key={item.id}
+                        ref={recordSelection.itemRef(item.id)}
+                        className={`border-b border-white/5 hover:bg-white/5 cursor-pointer transition-all ${recordSelection.isSelected(item.id) ? 'bg-brand-accent/10 outline outline-1 outline-brand-accent/45' : ''}`}
+                        onClick={e => recordSelection.handleItemClick(e, item, () => setSelectedAffiliate(item))}
+                      >
                         <td className="py-2 px-3 text-white text-sm">{item.name}</td>
                         <td className="py-2 px-3 text-gray-400 text-sm">{item.platform}</td>
                         <td className="py-2 px-3 text-brand-success font-mono text-sm">{item.code || '-'}</td>
@@ -528,7 +637,12 @@ export default function Affiliates({ userId, resetKey }) {
                     <p className="text-xs mt-1 text-gray-600">Tap <span className="text-brand-accent">Add</span> to get started</p>
                   </div>
                 ) : sortedAffiliates.map(item => (
-                  <div key={item.id} className="mobile-card" onClick={() => setSelectedAffiliate(item)}>
+                  <div
+                    key={item.id}
+                    ref={recordSelection.itemRef(item.id)}
+                    className={`mobile-card ${recordSelection.isSelected(item.id) ? 'ring-1 ring-brand-accent/70 bg-brand-accent/10' : ''}`}
+                    onClick={e => recordSelection.handleItemClick(e, item, () => setSelectedAffiliate(item))}
+                  >
                     <div className="flex items-start justify-between mb-1.5">
                       <div className="min-w-0 flex-1">
                         <div className="text-white text-sm font-medium truncate">{item.name}</div>

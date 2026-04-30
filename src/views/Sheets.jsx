@@ -9,6 +9,8 @@ import {
   useSheets,
 } from '../hooks/useSheets'
 import { animateLayoutShift, rememberLayoutNode } from '../lib/reorderAnimation'
+import SelectionBar from '../components/SelectionBar'
+import { copyToClipboard, isEditingTarget, useMultiSelection } from '../hooks/useMultiSelection'
 
 const Plus = () => <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
 const Trash = () => <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
@@ -601,6 +603,10 @@ export default function Sheets({ userId, resetKey, registerUndo, embedded = fals
     if (!active || !activeIsBatchProduction || !activeBatchProduct) return active?.rows || []
     return active.rows.filter(row => cellByName(active, row, 'Product') === activeBatchProduct)
   }, [active, activeBatchProduct, activeIsBatchProduction])
+  const rowSelection = useMultiSelection(visibleRows)
+  const columnSelection = useMultiSelection(pinnedCols)
+  const clearRowSelection = rowSelection.clearSelection
+  const clearColumnSelection = columnSelection.clearSelection
   const detailPopupRow = useMemo(() => (
     detailRowId ? visibleRows.find(row => row.id === detailRowId) || active?.rows.find(row => row.id === detailRowId) : null
   ), [active, detailRowId, visibleRows])
@@ -619,6 +625,37 @@ export default function Sheets({ userId, resetKey, registerUndo, embedded = fals
   useEffect(() => {
     if (active && !isBatchProductionSheet(active)) setActiveBatchProduct(null)
   }, [active])
+
+  useEffect(() => {
+    clearRowSelection()
+    clearColumnSelection()
+  }, [activeId, activeBatchProduct, resetKey, clearRowSelection, clearColumnSelection])
+
+  useEffect(() => {
+    const fn = (e) => {
+      if (isEditingTarget(e.target)) return
+      const mod = e.ctrlKey || e.metaKey
+      const key = e.key.toLowerCase()
+      if (mod && key === 'a' && visibleRows.length) {
+        e.preventDefault()
+        columnSelection.clearSelection()
+        rowSelection.selectAll(visibleRows)
+      } else if (mod && key === 'c' && (rowSelection.selectedCount || columnSelection.selectedCount)) {
+        e.preventDefault()
+        if (columnSelection.selectedCount) copySelectedColumns()
+        else copySelectedRows()
+      } else if (e.key === 'Escape' && (rowSelection.selectedCount || columnSelection.selectedCount)) {
+        rowSelection.clearSelection()
+        columnSelection.clearSelection()
+      } else if ((e.key === 'Delete' || e.key === 'Backspace') && (rowSelection.selectedCount || columnSelection.selectedCount)) {
+        e.preventDefault()
+        if (columnSelection.selectedCount) deleteSelectedColumns()
+        else deleteSelectedRows()
+      }
+    }
+    window.addEventListener('keydown', fn)
+    return () => window.removeEventListener('keydown', fn)
+  })
 
   function bumpHistory() {
     setHistoryVersion(v => v + 1)
@@ -870,6 +907,90 @@ export default function Sheets({ userId, resetKey, registerUndo, embedded = fals
       return { ...row, cells }
     })
     queueSaveNow({ ...active, columns, rows })
+  }
+
+  function copySelectedRows() {
+    if (!active || !rowSelection.selectedCount) return
+    const columns = active.columns
+    const selectedIds = new Set(rowSelection.selectedItems.map(row => row.id))
+    const rows = visibleRows.filter(row => selectedIds.has(row.id))
+    const text = [
+      columns.map(col => col.name).join('\t'),
+      ...rows.map(row => columns.map(col => row.cells[col.id] || '').join('\t')),
+    ].join('\n')
+    copyToClipboard(text)
+  }
+
+  function copySelectedColumns() {
+    if (!active || !columnSelection.selectedCount) return
+    const selectedIds = new Set(columnSelection.selectedItems.map(col => col.id))
+    const columns = pinnedCols.filter(col => selectedIds.has(col.id))
+    const text = [
+      columns.map(col => col.name).join('\t'),
+      ...visibleRows.map(row => columns.map(col => row.cells[col.id] || '').join('\t')),
+    ].join('\n')
+    copyToClipboard(text)
+  }
+
+  function clearSelectedRows() {
+    if (!active || !rowSelection.selectedCount) return
+    const selectedIds = new Set(rowSelection.selectedItems.map(row => row.id))
+    const rows = active.rows.map(row => (
+      selectedIds.has(row.id) ? { ...row, cells: blankCells(active.columns) } : row
+    ))
+    queueSave({ ...active, rows })
+  }
+
+  function duplicateSelectedRows() {
+    if (!active || !rowSelection.selectedCount) return
+    const selectedIds = new Set(rowSelection.selectedItems.map(row => row.id))
+    const rows = active.rows.flatMap(row => (
+      selectedIds.has(row.id)
+        ? [row, { ...row, id: crypto.randomUUID(), cells: { ...row.cells } }]
+        : [row]
+    ))
+    queueSave({ ...active, rows })
+  }
+
+  function deleteSelectedRows() {
+    if (!active || !rowSelection.selectedCount) return
+    if (!confirm(`Delete ${rowSelection.selectedCount} selected row${rowSelection.selectedCount === 1 ? '' : 's'}?`)) return
+    const selectedIds = new Set(rowSelection.selectedItems.map(row => row.id))
+    if (detailRowId && selectedIds.has(detailRowId)) setDetailRowId(null)
+    queueSaveNow({ ...active, rows: active.rows.filter(row => !selectedIds.has(row.id)) })
+    rowSelection.clearSelection()
+  }
+
+  function clearSelectedColumns() {
+    if (!active || !columnSelection.selectedCount) return
+    const selectedIds = new Set(columnSelection.selectedItems.map(col => col.id))
+    const rows = active.rows.map(row => ({
+      ...row,
+      cells: Object.fromEntries(active.columns.map(col => [col.id, selectedIds.has(col.id) ? '' : (row.cells[col.id] || '')])),
+    }))
+    queueSave({ ...active, rows })
+  }
+
+  function moveSelectedColumnsToDetails() {
+    if (!active || !columnSelection.selectedCount || pinnedCols.length <= columnSelection.selectedCount) return
+    const selectedIds = new Set(columnSelection.selectedItems.map(col => col.id))
+    queueSave({ ...active, columns: active.columns.map(col => selectedIds.has(col.id) ? { ...col, pinned: false } : col) })
+    columnSelection.clearSelection()
+  }
+
+  function deleteSelectedColumns() {
+    if (!active || !columnSelection.selectedCount) return
+    if (active.columns.length - columnSelection.selectedCount < 1 || pinnedCols.length - columnSelection.selectedCount < 1) return
+    if (!confirm(`Delete ${columnSelection.selectedCount} selected column${columnSelection.selectedCount === 1 ? '' : 's'}?`)) return
+    const selectedIds = new Set(columnSelection.selectedItems.map(col => col.id))
+    const columns = active.columns.filter(col => !selectedIds.has(col.id))
+    const rows = active.rows.map(row => {
+      const cells = {}
+      columns.forEach(col => { cells[col.id] = row.cells[col.id] || '' })
+      return { ...row, cells }
+    })
+    queueSaveNow({ ...active, columns, rows })
+    columnSelection.clearSelection()
   }
 
   function pinColumn(colId) {
@@ -1474,7 +1595,12 @@ export default function Sheets({ userId, resetKey, registerUndo, embedded = fals
               </div>
             </div>
           ) : (
-            <div className="glass-card rounded p-3 sm:p-4 h-full flex flex-col overflow-hidden min-w-0">
+            <div
+              ref={rowSelection.containerRef}
+              onMouseDown={rowSelection.handleSurfaceMouseDown}
+              className="glass-card rounded p-3 sm:p-4 h-full flex flex-col overflow-hidden min-w-0 relative"
+            >
+              {rowSelection.selectionBox}
               <div className="flex flex-wrap sm:flex-nowrap items-center justify-between mb-2 pb-2 border-b border-white/10 shrink-0 gap-2 min-w-0">
                 <button onClick={() => setShowMobileSidebar(true)} className="sm:hidden nav-icon flex-shrink-0" title="Show sheets" aria-label="Show sheets">
                   <MenuIcon />
@@ -1549,6 +1675,28 @@ export default function Sheets({ userId, resetKey, registerUndo, embedded = fals
                 </button>
               </div>
 
+              <SelectionBar
+                count={columnSelection.selectedCount || rowSelection.selectedCount}
+                label={columnSelection.selectedCount ? 'column' : 'row'}
+                onClear={() => {
+                  rowSelection.clearSelection()
+                  columnSelection.clearSelection()
+                }}
+                actions={columnSelection.selectedCount
+                  ? [
+                    { label: 'Copy', onClick: copySelectedColumns },
+                    { label: 'Clear Cells', onClick: clearSelectedColumns },
+                    { label: 'To Details', onClick: moveSelectedColumnsToDetails, disabled: pinnedCols.length <= columnSelection.selectedCount },
+                    { label: 'Delete', danger: true, onClick: deleteSelectedColumns, disabled: active.columns.length - columnSelection.selectedCount < 1 || pinnedCols.length - columnSelection.selectedCount < 1 },
+                  ]
+                  : [
+                    { label: 'Copy', onClick: copySelectedRows },
+                    { label: 'Duplicate', onClick: duplicateSelectedRows },
+                    { label: 'Clear Cells', onClick: clearSelectedRows },
+                    { label: 'Delete', danger: true, onClick: deleteSelectedRows },
+                  ]}
+              />
+
               <div
                 className="mb-2 shrink-0 rounded border border-white/10 bg-white/[0.035] px-2 py-2 flex items-center gap-2 overflow-x-auto scrollbar-hide"
                 onDragOver={e => previewColumnDrop(e, false)}
@@ -1588,14 +1736,20 @@ export default function Sheets({ userId, resetKey, registerUndo, embedded = fals
                     {pinnedCols.map(col => (
                       <div
                         key={col.id}
-                        ref={node => rememberLayoutNode(columnLayoutRef, col.id, node)}
+                        ref={node => {
+                          rememberLayoutNode(columnLayoutRef, col.id, node)
+                          columnSelection.itemRef(col.id)(node)
+                        }}
                         draggable
                         onDragStart={e => startColumnDrag(e, col.id)}
                         onDragOver={e => previewColumnDrop(e, true, col.id)}
                         onDrop={e => dropColumn(e, true, col.id)}
                         onDragEnd={() => finishColumnDrag(true)}
                         onDoubleClick={() => cycleColumnWrap(col.id)}
-                        className={`group flex items-stretch gap-1 px-1 min-w-0 cursor-grab active:cursor-grabbing rounded border ${dragColumnId === col.id ? 'border-brand-accent/50 bg-brand-accent/5 opacity-80' : 'border-transparent'}`}
+                        onClick={e => {
+                          if (columnSelection.handleItemClick(e, col)) rowSelection.clearSelection()
+                        }}
+                        className={`group flex items-stretch gap-1 px-1 min-w-0 cursor-grab active:cursor-grabbing rounded border ${columnSelection.isSelected(col.id) ? 'border-brand-accent/70 bg-brand-accent/10' : dragColumnId === col.id ? 'border-brand-accent/50 bg-brand-accent/5 opacity-80' : 'border-transparent'}`}
                         title="Drag to reorder. Drag to Details to move into row popup. Double-click to pin wrap."
                       >
                         <textarea
@@ -1644,17 +1798,28 @@ export default function Sheets({ userId, resetKey, registerUndo, embedded = fals
                     const outOfStock = rowIsOutOfStock(active, row)
                     const rowPixels = rowHeight(row)
                     return (
-                      <div key={row.id} ref={node => rememberLayoutNode(rowLayoutRef, row.id, node)}>
+                      <div
+                        key={row.id}
+                        ref={node => {
+                          rememberLayoutNode(rowLayoutRef, row.id, node)
+                          rowSelection.itemRef(row.id)(node)
+                        }}
+                      >
                         <div
-                          className={`relative grid gap-1 border-b hover:bg-white/[0.025] rounded-sm ${dragRowId === row.id ? 'ring-1 ring-brand-accent/50 bg-brand-accent/[0.04]' : ''} ${outOfStock ? 'border-red-500/50 ring-1 ring-red-500/35 bg-red-500/[0.035]' : 'border-white/5'}`}
+                          className={`relative grid gap-1 border-b hover:bg-white/[0.025] rounded-sm ${rowSelection.isSelected(row.id) ? 'ring-1 ring-brand-accent/70 bg-brand-accent/[0.06]' : ''} ${dragRowId === row.id ? 'ring-1 ring-brand-accent/50 bg-brand-accent/[0.04]' : ''} ${outOfStock ? 'border-red-500/50 ring-1 ring-red-500/35 bg-red-500/[0.035]' : 'border-white/5'}`}
                           style={{ gridTemplateColumns: gridTemplate, minHeight: rowPixels }}
                           onDragOver={e => previewRowDrop(e, row.id)}
                           onDrop={e => dropRow(e, row.id)}
                         >
                           <div
                             draggable
+                            data-selection-ignore="true"
                             onDragStart={e => startRowDrag(e, row.id)}
                             onDragEnd={() => finishRowDrag(true)}
+                            onClick={e => {
+                              columnSelection.clearSelection()
+                              rowSelection.handleItemClick(e, row)
+                            }}
                             className="text-xs text-gray-600 px-1 py-2 select-none cursor-grab active:cursor-grabbing h-full flex items-start"
                             title="Drag to reorder row"
                             aria-label={`Move row ${rowIndex + 1}`}
@@ -1662,7 +1827,7 @@ export default function Sheets({ userId, resetKey, registerUndo, embedded = fals
                             {rowIndex + 1}
                           </div>
                           {pinnedCols.map(col => (
-                            <div key={col.id} className="my-1 min-w-0">
+                            <div key={col.id} className={`my-1 min-w-0 rounded-sm ${columnSelection.isSelected(col.id) ? 'bg-brand-accent/10' : ''}`}>
                               {renderSheetCell(row, col, { minHeight: `${rowPixels}px` })}
                             </div>
                           ))}
@@ -1703,7 +1868,16 @@ export default function Sheets({ userId, resetKey, registerUndo, embedded = fals
                 {visibleRows.map((row, rowIndex) => {
                   const outOfStock = rowIsOutOfStock(active, row)
                   return (
-                    <div key={row.id} className={`bg-white/[0.04] border rounded-lg p-3 ${outOfStock ? 'border-red-500/60 ring-1 ring-red-500/35 bg-red-500/[0.04]' : 'border-white/10'}`}>
+                    <div
+                      key={row.id}
+                      ref={rowSelection.itemRef(row.id)}
+                      onClick={e => {
+                        if (e.target.closest('input,textarea,button,a')) return
+                        columnSelection.clearSelection()
+                        rowSelection.handleItemClick(e, row)
+                      }}
+                      className={`bg-white/[0.04] border rounded-lg p-3 ${rowSelection.isSelected(row.id) ? 'border-brand-accent/70 ring-1 ring-brand-accent/60 bg-brand-accent/10' : outOfStock ? 'border-red-500/60 ring-1 ring-red-500/35 bg-red-500/[0.04]' : 'border-white/10'}`}
+                    >
                       <div className="flex items-center justify-between gap-2">
                         <button
                           onClick={() => hasDetails && setDetailRowId(row.id)}
@@ -1730,7 +1904,7 @@ export default function Sheets({ userId, resetKey, registerUndo, embedded = fals
 
                       <div className="mt-3 space-y-3">
                         {pinnedCols.map(col => (
-                          <div key={col.id} className="min-w-0">
+                          <div key={col.id} className={`min-w-0 rounded ${columnSelection.isSelected(col.id) ? 'bg-brand-accent/10' : ''}`}>
                             <div className="flex items-center justify-between gap-2 mb-1">
                               <span className="text-[11px] text-gray-500 font-medium truncate">{col.name}</span>
                               <button

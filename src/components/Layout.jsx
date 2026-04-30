@@ -127,7 +127,7 @@ export default function Layout({ user, activeView, setActiveView, taskStats, onU
                   <SettingsIcon />
                 </button>
                 {showSettings && (
-                  <div className="absolute top-full left-0 mt-1 menu-dropdown rounded p-4 w-72 max-w-[calc(100vw-1rem)] animate-fadeIn z-50" onClick={e => e.stopPropagation()}>
+                  <div className="absolute top-full left-0 mt-1 menu-dropdown rounded p-4 w-80 max-w-[calc(100vw-1rem)] animate-fadeIn z-50" onClick={e => e.stopPropagation()}>
                     <h4 className="text-white font-medium mb-3 text-sm">Settings</h4>
                     <div className="space-y-3">
                       <div>
@@ -146,6 +146,27 @@ export default function Layout({ user, activeView, setActiveView, taskStats, onU
                           <p className="text-xs text-gray-500">Running in local mode. Add Supabase credentials to <code className="bg-black/30 px-1 rounded">.env.local</code> for cloud sync.</p>
                         </div>
                       )}
+                      <div className="pt-2 border-t border-white/10">
+                        <h5 className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">Keyboard Shortcuts</h5>
+                        <div className="space-y-1.5 text-xs">
+                          {[
+                            ['Ctrl/Cmd + Click', 'Toggle item selection'],
+                            ['Shift + Click', 'Select a range'],
+                            ['Drag Box', 'Select visible items'],
+                            ['Ctrl/Cmd + A', 'Select the active list'],
+                            ['Ctrl/Cmd + C', 'Copy selected items'],
+                            ['Delete', 'Delete selected items'],
+                            ['Esc', 'Clear selection'],
+                            ['Ctrl/Cmd + Z', 'Undo'],
+                            ['Ctrl/Cmd + Shift + Z', 'Redo'],
+                          ].map(([keys, label]) => (
+                            <div key={keys} className="flex items-center gap-3">
+                              <span className="min-w-[116px] text-gray-300 font-mono text-[11px]">{keys}</span>
+                              <span className="text-gray-500">{label}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
                       {isConfigured && (
                         <div className="pt-2 border-t border-white/10">
                           <button onClick={() => supabase.auth.signOut()} className="w-full px-3 py-2.5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 rounded text-red-400 text-sm transition-all">

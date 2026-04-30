@@ -2,6 +2,8 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
 import { useFormulas } from '../hooks/useFormulas'
 import { LEGACY_INVENTORY_SHEET_NAME, MASTER_SOURCING_SHEET_NAME, useSheets } from '../hooks/useSheets'
+import SelectionBar from '../components/SelectionBar'
+import { copyToClipboard, isEditingTarget, useMultiSelection } from '../hooks/useMultiSelection'
 
 const Plus = () => <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
 const Trash = () => <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
@@ -273,15 +275,44 @@ export default function Formulas({ userId, resetKey, registerUndo, embedded = fa
   }, [activeId])
 
   const active = localFormulas.find(f => f.id === activeId)
+  const activeIngredients = useMemo(() => active?.ingredients || [], [active])
+  const ingredientSelection = useMultiSelection(activeIngredients)
+  const clearIngredientSelection = ingredientSelection.clearSelection
   const selectedIngredient = active?.ingredients.find(ing => ing.id === selectedIngredientId)
   const sourcingItems = useMemo(() => buildSourcingItems(sourcingSheets), [sourcingSheets])
   const selectedSourcingItem = sourcingItems.find(item => item.key === selectedIngredient?.sourcingItemId)
+
+  useEffect(() => {
+    clearIngredientSelection()
+  }, [activeId, resetKey, clearIngredientSelection])
 
   useEffect(() => {
     if (!active || !selectedIngredientId || !active.ingredients.some(ing => ing.id === selectedIngredientId)) {
       setSelectedIngredientId(null)
     }
   }, [active, selectedIngredientId])
+
+  useEffect(() => {
+    const fn = (e) => {
+      if (isEditingTarget(e.target)) return
+      const mod = e.ctrlKey || e.metaKey
+      const key = e.key.toLowerCase()
+      if (mod && key === 'a' && activeIngredients.length) {
+        e.preventDefault()
+        ingredientSelection.selectAll(activeIngredients)
+      } else if (mod && key === 'c' && ingredientSelection.selectedCount) {
+        e.preventDefault()
+        copySelectedIngredients()
+      } else if (e.key === 'Escape' && ingredientSelection.selectedCount) {
+        ingredientSelection.clearSelection()
+      } else if ((e.key === 'Delete' || e.key === 'Backspace') && ingredientSelection.selectedCount) {
+        e.preventDefault()
+        deleteSelectedIngredients()
+      }
+    }
+    window.addEventListener('keydown', fn)
+    return () => window.removeEventListener('keydown', fn)
+  })
 
   const canFUndo = activeId && (undoRef.current[activeId]?.length > 0)
   const canFRedo = activeId && (redoRef.current[activeId]?.length > 0)
@@ -468,6 +499,48 @@ export default function Formulas({ userId, resetKey, registerUndo, embedded = fa
     if (selectedIngredientId === ingId) setSelectedIngredientId(null)
     setFormulaLocal(updated)
     handleSave(updated)
+  }
+
+  function selectedIngredientText() {
+    const header = 'Ingredient\tAmount\tRatio\tCost\tIncluded\tLink\tNotes'
+    const rows = ingredientSelection.selectedItems.map(ing => [
+      ing.name,
+      ing.amount,
+      ing.ratio,
+      ing.cost,
+      ing.includeInRatio === false ? 'No' : 'Yes',
+      ing.link,
+      ing.notes,
+    ].map(value => String(value ?? '').replace(/\s+/g, ' ').trim()).join('\t'))
+    return [header, ...rows].join('\n')
+  }
+
+  function copySelectedIngredients() {
+    if (ingredientSelection.selectedCount) copyToClipboard(selectedIngredientText())
+  }
+
+  function patchSelectedIngredients(changes) {
+    if (!active || !ingredientSelection.selectedCount) return
+    const selectedIds = new Set(ingredientSelection.selectedItems.map(ing => ing.id))
+    schedulePre(active)
+    const updated = {
+      ...active,
+      ingredients: active.ingredients.map(ing => selectedIds.has(ing.id) ? normalizeIngredient({ ...ing, ...changes }) : ing),
+    }
+    setFormulaLocal(updated)
+    handleSave(updated)
+  }
+
+  function deleteSelectedIngredients() {
+    if (!active || !ingredientSelection.selectedCount) return
+    if (!confirm(`Delete ${ingredientSelection.selectedCount} selected ingredient${ingredientSelection.selectedCount === 1 ? '' : 's'}?`)) return
+    const selectedIds = new Set(ingredientSelection.selectedItems.map(ing => ing.id))
+    schedulePre(active)
+    const updated = { ...active, ingredients: active.ingredients.filter(ing => !selectedIds.has(ing.id)) }
+    if (selectedIngredientId && selectedIds.has(selectedIngredientId)) setSelectedIngredientId(null)
+    setFormulaLocal(updated)
+    handleSave(updated)
+    ingredientSelection.clearSelection()
   }
 
   function saveIngredient(formulaId) {
@@ -848,7 +921,24 @@ export default function Formulas({ userId, resetKey, registerUndo, embedded = fa
               </div>
 
               {/* Ingredient editor */}
-              <div className="flex-1 overflow-y-auto overflow-x-hidden min-h-0">
+              <div
+                ref={ingredientSelection.containerRef}
+                onMouseDown={ingredientSelection.handleSurfaceMouseDown}
+                className="flex-1 overflow-y-auto overflow-x-hidden min-h-0 relative"
+              >
+                {ingredientSelection.selectionBox}
+                <SelectionBar
+                  count={ingredientSelection.selectedCount}
+                  label="ingredient"
+                  onClear={ingredientSelection.clearSelection}
+                  actions={[
+                    { label: 'Copy', onClick: copySelectedIngredients },
+                    { label: 'Include', onClick: () => patchSelectedIngredients({ includeInRatio: true }) },
+                    { label: 'Exclude', onClick: () => patchSelectedIngredients({ includeInRatio: false }) },
+                    { label: 'Clear Details', onClick: () => patchSelectedIngredients({ link: '', notes: '', sourcingItemId: '' }) },
+                    { label: 'Delete', danger: true, onClick: deleteSelectedIngredients },
+                  ]}
+                />
                 <div className="sm:hidden space-y-2">
                   {active.ingredients.map(ing => {
                     const previewVal = getRatioPreview(active, ing, ratioPreview.sourceId, ratioPreview.sourceValue)
@@ -856,7 +946,12 @@ export default function Formulas({ userId, resetKey, registerUndo, embedded = fa
                     const showingPreview = previewVal !== null
 
                     return (
-                      <div key={ing.id} className="rounded border border-white/10 bg-white/[0.035] p-3 space-y-3">
+                      <div
+                        key={ing.id}
+                        ref={ingredientSelection.itemRef(ing.id)}
+                        onClick={e => ingredientSelection.handleItemClick(e, ing)}
+                        className={`rounded border bg-white/[0.035] p-3 space-y-3 ${ingredientSelection.isSelected(ing.id) ? 'border-brand-accent/70 ring-1 ring-brand-accent/60 bg-brand-accent/10' : 'border-white/10'}`}
+                      >
                         <div className="flex items-center gap-2 min-w-0">
                           <button
                             title={ing.includeInRatio ? 'Included in ratio' : 'Excluded from ratio'}
@@ -987,8 +1082,10 @@ export default function Formulas({ userId, resetKey, registerUndo, embedded = fa
                       return (
                         <div
                           key={ing.id}
-                          className="group rounded hover:bg-white/[0.03] cursor-pointer transition-colors"
+                          ref={ingredientSelection.itemRef(ing.id)}
+                          className={`group rounded hover:bg-white/[0.03] cursor-pointer transition-colors ${ingredientSelection.isSelected(ing.id) ? 'ring-1 ring-brand-accent/70 bg-brand-accent/10' : ''}`}
                           onClick={e => {
+                            if (ingredientSelection.handleItemClick(e, ing)) return
                             if (e.target.closest('input,button,textarea,a')) return
                             setSelectedIngredientId(ing.id)
                           }}

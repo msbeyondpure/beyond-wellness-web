@@ -1,6 +1,8 @@
 /* eslint-disable react/prop-types */
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useEditorFiles } from '../hooks/useEditorFiles'
+import SelectionBar from '../components/SelectionBar'
+import { copyToClipboard, isEditingTarget, useMultiSelection } from '../hooks/useMultiSelection'
 
 // ── icons ─────────────────────────────────────────────────────────────────────
 const FolderIcon = ({ open }) => open
@@ -40,6 +42,7 @@ const isText    = (name) => ['md','markdown','txt','html','htm','js','jsx','ts',
 const UNDO_KEY = (p) => `bwUndo:${p}`
 const REDO_KEY = (p) => `bwRedo:${p}`
 const MAX_HIST = 100
+const getFileSelectionId = node => node.path
 function loadStack(key) { try { return JSON.parse(localStorage.getItem(key)) || [] } catch { return [] } }
 function saveStack(key, arr) { try { localStorage.setItem(key, JSON.stringify(arr)) } catch { /* ignore storage failures */ } }
 
@@ -501,7 +504,7 @@ function BlocksMenu({ onInsert, onClose }) {
 }
 
 // ── tree node ─────────────────────────────────────────────────────────────────
-function TreeNode({ node, files, depth = 0, activeFile, openFolders, onSelect, onToggle, onCtx, renaming, renameValue, setRenameValue, onRenameBlur, onRenameKey }) {
+function TreeNode({ node, files, depth = 0, activeFile, openFolders, onSelect, onToggle, onCtx, renaming, renameValue, setRenameValue, onRenameBlur, onRenameKey, selection }) {
   const children = files.filter(n => n.parent_path === node.path).sort((a, b) => {
     if (a.type !== b.type) return a.type === 'folder' ? -1 : 1
     return a.name.localeCompare(b.name)
@@ -513,9 +516,12 @@ function TreeNode({ node, files, depth = 0, activeFile, openFolders, onSelect, o
     <div>
       <div
         className={`flex items-center gap-1.5 py-1.5 sm:py-0.5 px-2 rounded cursor-pointer group transition-all
-          ${isActive ? 'bg-brand-accent/15 text-white' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5 active:bg-white/10'}`}
+          ${selection?.isSelected(node.path) ? 'bg-brand-accent/20 text-white ring-1 ring-brand-accent/55' : isActive ? 'bg-brand-accent/15 text-white' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5 active:bg-white/10'}`}
+        ref={selection?.itemRef(node.path)}
         style={{ paddingLeft: `${8 + depth * 14}px` }}
-        onClick={() => node.type === 'folder' ? onToggle(node.path) : onSelect(node)}
+        onClick={e => selection
+          ? selection.handleItemClick(e, node, () => node.type === 'folder' ? onToggle(node.path) : onSelect(node))
+          : (node.type === 'folder' ? onToggle(node.path) : onSelect(node))}
         onContextMenu={e => { e.preventDefault(); e.stopPropagation(); onCtx(e, node) }}
       >
         {node.type === 'folder' && <span className="text-gray-600 w-3 flex-shrink-0">{isOpen ? <ChevD /> : <ChevR />}</span>}
@@ -534,6 +540,7 @@ function TreeNode({ node, files, depth = 0, activeFile, openFolders, onSelect, o
           onSelect={onSelect} onToggle={onToggle} onCtx={onCtx}
           renaming={renaming} renameValue={renameValue}
           setRenameValue={setRenameValue} onRenameBlur={onRenameBlur} onRenameKey={onRenameKey}
+          selection={selection}
         />
       ))}
     </div>
@@ -541,6 +548,24 @@ function TreeNode({ node, files, depth = 0, activeFile, openFolders, onSelect, o
 }
 
 // ── toolbar buttons ───────────────────────────────────────────────────────────
+function sortedTreeChildren(files, parentPath = '') {
+  return files
+    .filter(n => n.parent_path === parentPath)
+    .sort((a, b) => {
+      if (a.type !== b.type) return a.type === 'folder' ? -1 : 1
+      return a.name.localeCompare(b.name)
+    })
+}
+
+function visibleTreeNodes(files, openFolders, parentPath = '') {
+  const children = sortedTreeChildren(files, parentPath)
+  return children.flatMap(node => (
+    node.type === 'folder' && openFolders.has(node.path)
+      ? [node, ...visibleTreeNodes(files, openFolders, node.path)]
+      : [node]
+  ))
+}
+
 function TB({ onClick, title, active, disabled, children }) {
   return (
     <button onMouseDown={e => { e.preventDefault(); if (!disabled) onClick() }} title={title} disabled={disabled}
@@ -982,6 +1007,69 @@ export default function Editor({ userId, resetKey, registerUndo, embedded = fals
     if (a.type !== b.type) return a.type === 'folder' ? -1 : 1
     return a.name.localeCompare(b.name)
   })
+  const visibleFiles = useMemo(() => visibleTreeNodes(files, openFolders), [files, openFolders])
+  const fileSelection = useMultiSelection(visibleFiles, { getId: getFileSelectionId })
+
+  function copySelectedFilePaths() {
+    if (fileSelection.selectedCount) copyToClipboard(fileSelection.selectedItems.map(node => node.path).join('\n'))
+  }
+
+  function openFirstSelectedFile() {
+    const node = fileSelection.selectedItems[0]
+    if (!node) return
+    if (node.type === 'folder') {
+      setOpenFolders(s => {
+        const next = new Set(s)
+        next.has(node.path) ? next.delete(node.path) : next.add(node.path)
+        return next
+      })
+    } else {
+      openFile(node)
+    }
+  }
+
+  function pathWithin(path, root) {
+    return path === root || path.startsWith(root + '/')
+  }
+
+  async function deleteSelectedFiles() {
+    if (!fileSelection.selectedCount) return
+    if (!confirm(`Delete ${fileSelection.selectedCount} selected item${fileSelection.selectedCount === 1 ? '' : 's'}?`)) return
+    const selected = fileSelection.selectedItems
+    const selectedPaths = new Set(selected.map(node => node.path))
+    const topLevel = selected.filter(node => {
+      const parts = node.path.split('/')
+      return !parts.slice(1).some((_, index) => selectedPaths.has(parts.slice(0, index + 1).join('/')))
+    })
+    if (activeFile && selected.some(node => pathWithin(activeFile.path, node.path))) {
+      setActiveFile(null)
+    }
+    setOpenTabs(prev => prev.filter(tab => !selected.some(node => pathWithin(tab.path, node.path))))
+    for (const node of topLevel) await deleteNode(node.path)
+    fileSelection.clearSelection()
+  }
+
+  useEffect(() => {
+    const fn = (e) => {
+      if (isEditingTarget(e.target)) return
+      const mod = e.ctrlKey || e.metaKey
+      const key = e.key.toLowerCase()
+      if (mod && key === 'a' && visibleFiles.length) {
+        e.preventDefault()
+        fileSelection.selectAll(visibleFiles)
+      } else if (mod && key === 'c' && fileSelection.selectedCount) {
+        e.preventDefault()
+        copySelectedFilePaths()
+      } else if (e.key === 'Escape' && fileSelection.selectedCount) {
+        fileSelection.clearSelection()
+      } else if ((e.key === 'Delete' || e.key === 'Backspace') && fileSelection.selectedCount) {
+        e.preventDefault()
+        deleteSelectedFiles()
+      }
+    }
+    window.addEventListener('keydown', fn)
+    return () => window.removeEventListener('keydown', fn)
+  })
 
   const isMd        = activeFile && isMarkdown(activeFile.name)
   const isHtml_     = activeFile && isHtml(activeFile.name)
@@ -1017,7 +1105,22 @@ export default function Editor({ userId, resetKey, registerUndo, embedded = fals
           />
         </div>
       )}
-      <div className="flex-1 overflow-y-auto">
+      <SelectionBar
+        count={fileSelection.selectedCount}
+        label="item"
+        onClear={fileSelection.clearSelection}
+        actions={[
+          { label: 'Copy Paths', onClick: copySelectedFilePaths },
+          { label: 'Open', onClick: openFirstSelectedFile },
+          { label: 'Delete', danger: true, onClick: deleteSelectedFiles },
+        ]}
+      />
+      <div
+        ref={fileSelection.containerRef}
+        onMouseDown={fileSelection.handleSurfaceMouseDown}
+        className="flex-1 overflow-y-auto relative"
+      >
+        {fileSelection.selectionBox}
         {roots.length === 0 && !newItemTarget && (
           <p className="text-gray-600 text-xs text-center py-6 leading-relaxed">No files yet.<br />Use the + buttons above.</p>
         )}
@@ -1029,6 +1132,7 @@ export default function Editor({ userId, resetKey, registerUndo, embedded = fals
               onCtx={nodeCtx} renaming={renaming} renameValue={renameValue}
               setRenameValue={setRenameValue} onRenameBlur={commitRename}
               onRenameKey={e => { if (e.key === 'Enter') commitRename(); if (e.key === 'Escape') setRenaming(null) }}
+              selection={fileSelection}
             />
             {newItemTarget?.parentPath === node.path && openFolders.has(node.path) && (
               <div style={{ paddingLeft: '22px' }}>

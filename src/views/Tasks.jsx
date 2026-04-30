@@ -3,6 +3,8 @@ import { useState, useRef, useEffect, useMemo } from 'react'
 import { useTasks } from '../hooks/useTasks'
 import { useNotepad } from '../hooks/useNotepad'
 import { animateLayoutShift, rememberLayoutNode } from '../lib/reorderAnimation'
+import SelectionBar from '../components/SelectionBar'
+import { copyToClipboard, isEditingTarget, useMultiSelection } from '../hooks/useMultiSelection'
 
 // Icons
 const Plus = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -118,6 +120,10 @@ export default function Tasks({ userId, onStatsChange, resetKey }) {
     return [...ordered, ...rest]
   }, [rawCategories, categoryOrder])
   const displayCategories = previewCategoryOrder || categories
+  const visibleTaskItems = useMemo(() => (
+    displayCategories.flatMap(cat => displayTasks.filter(t => t.category === cat && !t.hidden).sort(sortTasksForDisplay))
+  ), [displayCategories, displayTasks])
+  const taskSelection = useMultiSelection(visibleTaskItems)
 
   const getProgress = (cat) => {
     const ct = displayTasks.filter(t => t.category === cat && !t.hidden)
@@ -154,6 +160,28 @@ export default function Tasks({ userId, onStatsChange, resetKey }) {
     window.addEventListener('restore-task', handler)
     return () => window.removeEventListener('restore-task', handler)
   }, [restoreTask])
+
+  useEffect(() => {
+    const fn = (e) => {
+      if (isEditingTarget(e.target)) return
+      const mod = e.ctrlKey || e.metaKey
+      const key = e.key.toLowerCase()
+      if (mod && key === 'a') {
+        e.preventDefault()
+        taskSelection.selectAll(visibleTaskItems)
+      } else if (mod && key === 'c' && taskSelection.selectedCount) {
+        e.preventDefault()
+        copySelectedTasks()
+      } else if (e.key === 'Escape' && taskSelection.selectedCount) {
+        taskSelection.clearSelection()
+      } else if ((e.key === 'Delete' || e.key === 'Backspace') && taskSelection.selectedCount) {
+        e.preventDefault()
+        deleteSelectedTasks()
+      }
+    }
+    window.addEventListener('keydown', fn)
+    return () => window.removeEventListener('keydown', fn)
+  })
 
   const toggleTask = (id, e) => {
     e?.stopPropagation()
@@ -203,6 +231,36 @@ export default function Tasks({ userId, onStatsChange, resetKey }) {
     window.dispatchEvent(new CustomEvent('trash-updated'))
     deleteTask(id)
     if (expandedTask === id) setExpandedTask(null)
+  }
+
+  function selectedTaskText() {
+    return taskSelection.selectedItems
+      .map(task => `- [${task.completed ? 'x' : ' '}] ${task.text}${task.category ? ` (${task.category})` : ''}`)
+      .join('\n')
+  }
+
+  function copySelectedTasks() {
+    if (!taskSelection.selectedCount) return
+    copyToClipboard(selectedTaskText())
+  }
+
+  function completeSelectedTasks() {
+    taskSelection.selectedItems.forEach(task => {
+      if (!task.completed) updateTask(task.id, { completed: true, completed_at: new Date().toISOString(), hidden: false })
+    })
+  }
+
+  function uncompleteSelectedTasks() {
+    taskSelection.selectedItems.forEach(task => {
+      if (task.completed) updateTask(task.id, { completed: false, completed_at: null, hidden: false })
+    })
+  }
+
+  function deleteSelectedTasks() {
+    if (!taskSelection.selectedCount) return
+    if (!confirm(`Delete ${taskSelection.selectedCount} selected task${taskSelection.selectedCount === 1 ? '' : 's'}?`)) return
+    taskSelection.selectedItems.forEach(task => handleDeleteTask(task.id))
+    taskSelection.clearSelection()
   }
 
   const renameCategory = (oldCat, newCat) => {
@@ -402,7 +460,12 @@ export default function Tasks({ userId, onStatsChange, resetKey }) {
         </div>
 
         {/* ── Tasks (RIGHT on desktop, full-width on mobile) ── */}
-        <div className="tasks-section glass-card rounded p-3 sm:p-5 flex-1 min-w-0">
+        <div
+          ref={taskSelection.containerRef}
+          onMouseDown={taskSelection.handleSurfaceMouseDown}
+          className="tasks-section glass-card rounded p-3 sm:p-5 flex-1 min-w-0 relative"
+        >
+          {taskSelection.selectionBox}
           <div className="flex items-center justify-between mb-4 sm:mb-5 gap-2">
             <h2 className="text-base sm:text-lg font-semibold text-brand-accent">Tasks</h2>
             <div className="flex gap-1.5 sm:gap-2 flex-wrap justify-end">
@@ -464,6 +527,18 @@ export default function Tasks({ userId, onStatsChange, resetKey }) {
             </div>
           )}
 
+          <SelectionBar
+            count={taskSelection.selectedCount}
+            label="task"
+            onClear={taskSelection.clearSelection}
+            actions={[
+              { label: 'Copy', onClick: copySelectedTasks },
+              { label: 'Complete', onClick: completeSelectedTasks },
+              { label: 'Uncomplete', onClick: uncompleteSelectedTasks },
+              { label: 'Delete', danger: true, onClick: deleteSelectedTasks },
+            ]}
+          />
+
           {displayCategories.length === 0 && (
             <div className="text-center py-12 text-gray-600">
               <p className="text-sm">No tasks yet.</p>
@@ -487,6 +562,7 @@ export default function Tasks({ userId, onStatsChange, resetKey }) {
                   <div className="flex items-center gap-2 min-w-0 flex-1">
                     <div
                       draggable
+                      data-selection-ignore="true"
                       onDragStart={e => handleSectionDragStart(e, cat)}
                       onDragEnd={() => finishSectionDrag(true)}
                       className="cursor-grab text-gray-600 hover:text-gray-400 hidden sm:block"
@@ -559,17 +635,21 @@ export default function Tasks({ userId, onStatsChange, resetKey }) {
                     {orderedVisibleTasks(cat).map(task => (
                       <div
                         key={task.id}
-                        ref={node => rememberLayoutNode(taskLayoutRef, task.id, node)}
-                        className={`task-card bg-white/5 rounded overflow-hidden ${dragTaskId === task.id ? 'opacity-50' : ''} ${dragOverTaskId === task.id ? 'ring-1 ring-brand-accent/70' : ''} ${sendingComplete === task.id ? 'send-complete-animate' : ''} ${checkAnimating === task.id ? 'task-success-flash' : ''}`}
+                        ref={node => {
+                          rememberLayoutNode(taskLayoutRef, task.id, node)
+                          taskSelection.itemRef(task.id)(node)
+                        }}
+                        className={`task-card bg-white/5 rounded overflow-hidden ${taskSelection.isSelected(task.id) ? 'ring-1 ring-brand-accent/80 bg-brand-accent/10' : ''} ${dragTaskId === task.id ? 'opacity-50' : ''} ${dragOverTaskId === task.id ? 'ring-1 ring-brand-accent/70' : ''} ${sendingComplete === task.id ? 'send-complete-animate' : ''} ${checkAnimating === task.id ? 'task-success-flash' : ''}`}
                         onDragOver={e => handleTaskDragOver(e, task.id)}
                         onDrop={e => { if (dragTaskId) handleTaskDrop(e, task.id) }}
                         onDragEnd={() => finishTaskDrag(true)}
-                        onClick={() => setExpandedTask(expandedTask === task.id ? null : task.id)}
+                        onClick={e => taskSelection.handleItemClick(e, task, () => setExpandedTask(expandedTask === task.id ? null : task.id))}
                       >
                         <div className="flex items-center gap-1 sm:gap-1 p-2.5 sm:p-3 cursor-pointer">
                           <span
                             className="task-drag-handle flex-shrink-0 text-gray-500 hover:text-brand-accent mr-1 hidden sm:flex"
                             draggable
+                            data-selection-ignore="true"
                             onDragStart={e => handleTaskDragStart(e, task.id)}
                             onClick={e => e.stopPropagation()}
                             title="Drag to reorder"
