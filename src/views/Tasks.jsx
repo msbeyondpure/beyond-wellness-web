@@ -2,6 +2,7 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
 import { useTasks } from '../hooks/useTasks'
 import { useNotepad } from '../hooks/useNotepad'
+import { animateLayoutShift, rememberLayoutNode } from '../lib/reorderAnimation'
 
 // Icons
 const Plus = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -35,6 +36,42 @@ function playSound(type) {
   }
 }
 
+function moveValue(list, source, target) {
+  if (!source || !target || source === target) return list
+  const from = list.indexOf(source)
+  const to = list.indexOf(target)
+  if (from < 0 || to < 0) return list
+  const next = [...list]
+  next.splice(from, 1)
+  next.splice(from < to ? to - 1 : to, 0, source)
+  return next
+}
+
+function sortTasksForDisplay(a, b) {
+  const order = Number(a.sort_order || 0) - Number(b.sort_order || 0)
+  if (order !== 0) return order
+  return String(a.created_at || '').localeCompare(String(b.created_at || ''))
+}
+
+function taskLayoutSignature(tasks) {
+  return (tasks || []).map(task => `${task.id}:${task.category}:${Number(task.sort_order || 0)}`).join('|')
+}
+
+function categoryLayoutSignature(categories) {
+  return (categories || []).join('|')
+}
+
+function replaceCategoryTasks(allTasks, category, orderedCategoryTasks) {
+  let inserted = false
+  return allTasks.flatMap(task => {
+    if (task.category !== category) return [task]
+    if (task.hidden) return [task]
+    if (inserted) return []
+    inserted = true
+    return orderedCategoryTasks
+  })
+}
+
 export default function Tasks({ userId, onStatsChange, resetKey }) {
   const { tasks, loading, addTask, updateTask, deleteTask, restoreTask, categoryOrder, setCategoryOrder } = useTasks(userId)
   const { content: notepadContent, updateContent } = useNotepad(userId)
@@ -55,6 +92,8 @@ export default function Tasks({ userId, onStatsChange, resetKey }) {
   const [dragOverTaskId, setDragOverTaskId] = useState(null)
   const [dragSectionCat, setDragSectionCat] = useState(null)
   const [dragOverSectionCat, setDragOverSectionCat] = useState(null)
+  const [previewTasks, setPreviewTasks] = useState(null)
+  const [previewCategoryOrder, setPreviewCategoryOrder] = useState(null)
   // Default notepad to collapsed on mobile, expanded on desktop
   const [notepadCollapsed, setNotepadCollapsed] = useState(() => {
     if (typeof window !== 'undefined') return window.innerWidth < 640
@@ -65,18 +104,24 @@ export default function Tasks({ userId, onStatsChange, resetKey }) {
   })
   const [showMobileNotepad, setShowMobileNotepad] = useState(false)
   const notepadRef = useRef(null)
+  const taskLayoutRef = useRef(new Map())
+  const sectionLayoutRef = useRef(new Map())
+  const dragTaskRef = useRef(null)
+  const dragSectionRef = useRef(null)
 
   // Derive ordered categories
-  const rawCategories = useMemo(() => [...new Set(tasks.map(t => t.category))], [tasks])
+  const displayTasks = previewTasks || tasks
+  const rawCategories = useMemo(() => [...new Set(displayTasks.map(t => t.category))], [displayTasks])
   const categories = useMemo(() => {
     const ordered = categoryOrder.filter(c => rawCategories.includes(c))
     const rest = rawCategories.filter(c => !ordered.includes(c))
     return [...ordered, ...rest]
   }, [rawCategories, categoryOrder])
+  const displayCategories = previewCategoryOrder || categories
 
   const getProgress = (cat) => {
-    const ct = tasks.filter(t => t.category === cat && !t.hidden)
-    const hidden = tasks.filter(t => t.category === cat && t.hidden).length
+    const ct = displayTasks.filter(t => t.category === cat && !t.hidden)
+    const hidden = displayTasks.filter(t => t.category === cat && t.hidden).length
     return { done: ct.filter(t => t.completed).length + hidden, total: ct.length + hidden }
   }
 
@@ -92,6 +137,7 @@ export default function Tasks({ userId, onStatsChange, resetKey }) {
     if (resetKey) {
       setExpandedTask(null); setShowNewTaskForm(null); setNewTaskText('')
       setShowNewCategoryForm(false); setNewCategoryName(''); setShowCompleted(false)
+      setPreviewTasks(null); setPreviewCategoryOrder(null)
     }
   }, [resetKey])
 
@@ -188,39 +234,110 @@ export default function Tasks({ userId, onStatsChange, resetKey }) {
     document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp)
   }
 
+  function orderedVisibleTasks(cat, source = displayTasks) {
+    return source
+      .filter(t => t.category === cat && !t.hidden)
+      .sort(sortTasksForDisplay)
+  }
+
   // Section drag
-  const handleSectionDragStart = (e, cat) => { setDragSectionCat(cat); e.dataTransfer.effectAllowed = 'move' }
-  const handleSectionDragOver = (e, cat) => { e.preventDefault(); if (dragSectionCat && dragSectionCat !== cat) setDragOverSectionCat(cat) }
+  const handleSectionDragStart = (e, cat) => {
+    setDragSectionCat(cat)
+    dragSectionRef.current = { cat, startOrder: displayCategories, latestOrder: displayCategories }
+    e.dataTransfer.effectAllowed = 'move'
+  }
+  const handleSectionDragOver = (e, cat) => {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    const drag = dragSectionRef.current
+    if (!drag?.cat || drag.cat === cat) return
+    const current = drag.latestOrder || displayCategories
+    const next = moveValue(current, drag.cat, cat)
+    if (categoryLayoutSignature(next) === categoryLayoutSignature(current)) return
+    animateLayoutShift(sectionLayoutRef, () => {
+      drag.latestOrder = next
+      setPreviewCategoryOrder(next)
+      setDragOverSectionCat(cat)
+    })
+  }
+  const finishSectionDrag = (save = true) => {
+    const drag = dragSectionRef.current
+    setDragSectionCat(null)
+    setDragOverSectionCat(null)
+    dragSectionRef.current = null
+    if (save && drag?.latestOrder && categoryLayoutSignature(drag.latestOrder) !== categoryLayoutSignature(drag.startOrder)) {
+      setCategoryOrder(drag.latestOrder)
+    }
+    requestAnimationFrame(() => setPreviewCategoryOrder(null))
+  }
   const handleSectionDrop = (e, targetCat) => {
     e.preventDefault()
-    if (!dragSectionCat || dragSectionCat === targetCat) { setDragSectionCat(null); setDragOverSectionCat(null); return }
-    const cats = [...categories]
-    const from = cats.indexOf(dragSectionCat); const to = cats.indexOf(targetCat)
-    cats.splice(from, 1); cats.splice(to, 0, dragSectionCat)
-    setCategoryOrder(cats)
-    setDragSectionCat(null); setDragOverSectionCat(null)
+    e.stopPropagation()
+    if (!dragSectionCat || !targetCat) {
+      finishSectionDrag(false)
+      return
+    }
+    handleSectionDragOver(e, targetCat)
+    finishSectionDrag(true)
   }
 
   // Task drag
-  const handleTaskDragStart = (e, taskId) => { e.stopPropagation(); setDragTaskId(taskId); e.dataTransfer.effectAllowed = 'move' }
+  const handleTaskDragStart = (e, taskId) => {
+    e.stopPropagation()
+    setDragTaskId(taskId)
+    dragTaskRef.current = { taskId, startTasks: displayTasks, latestTasks: displayTasks }
+    e.dataTransfer.effectAllowed = 'move'
+  }
   const handleTaskDragOver = (e, taskId) => {
-    if (!dragTaskId || dragTaskId === taskId) return
-    const dt = tasks.find(t => t.id === dragTaskId); const tt = tasks.find(t => t.id === taskId)
-    if (!dt || !tt || dt.category !== tt.category) return
-    e.preventDefault(); setDragOverTaskId(taskId)
+    const drag = dragTaskRef.current
+    if (!drag?.taskId || drag.taskId === taskId) return
+    const source = (drag.latestTasks || displayTasks).find(t => t.id === drag.taskId)
+    const target = (drag.latestTasks || displayTasks).find(t => t.id === taskId)
+    if (!source || !target || source.category !== target.category) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+
+    const currentTasks = drag.latestTasks || displayTasks
+    const categoryTasks = orderedVisibleTasks(source.category, currentTasks)
+    const from = categoryTasks.findIndex(t => t.id === drag.taskId)
+    const to = categoryTasks.findIndex(t => t.id === taskId)
+    if (from < 0 || to < 0) return
+    const reordered = [...categoryTasks]
+    const [moved] = reordered.splice(from, 1)
+    reordered.splice(from < to ? to - 1 : to, 0, moved)
+    const normalized = reordered.map((task, index) => ({ ...task, sort_order: index }))
+    const nextTasks = replaceCategoryTasks(currentTasks, source.category, normalized)
+    if (taskLayoutSignature(nextTasks) === taskLayoutSignature(currentTasks)) return
+    animateLayoutShift(taskLayoutRef, () => {
+      drag.latestTasks = nextTasks
+      setPreviewTasks(nextTasks)
+      setDragOverTaskId(taskId)
+    })
+  }
+  const finishTaskDrag = (save = true) => {
+    const drag = dragTaskRef.current
+    setDragTaskId(null)
+    setDragOverTaskId(null)
+    dragTaskRef.current = null
+    if (save && drag?.latestTasks && taskLayoutSignature(drag.latestTasks) !== taskLayoutSignature(drag.startTasks)) {
+      const source = drag.latestTasks.find(t => t.id === drag.taskId)
+      if (source) {
+        orderedVisibleTasks(source.category, drag.latestTasks).forEach((task, index) => {
+          updateTask(task.id, { sort_order: index })
+        })
+      }
+    }
+    requestAnimationFrame(() => setPreviewTasks(null))
   }
   const handleTaskDrop = (e, targetId) => {
-    e.preventDefault(); e.stopPropagation()
-    if (!dragTaskId || dragTaskId === targetId) { setDragTaskId(null); setDragOverTaskId(null); return }
-    const dt = tasks.find(t => t.id === dragTaskId); const tt = tasks.find(t => t.id === targetId)
-    if (!dt || !tt || dt.category !== tt.category) { setDragTaskId(null); setDragOverTaskId(null); return }
-    // reorder within category via sort_order updates
-    const catTasks = tasks.filter(t => t.category === dt.category)
-    const from = catTasks.findIndex(t => t.id === dragTaskId)
-    const to = catTasks.findIndex(t => t.id === targetId)
-    const reordered = [...catTasks]; reordered.splice(from, 1); reordered.splice(to, 0, dt)
-    reordered.forEach((t, i) => updateTask(t.id, { sort_order: i }))
-    setDragTaskId(null); setDragOverTaskId(null)
+    e.preventDefault()
+    e.stopPropagation()
+    if (!dragTaskId || !targetId) {
+      finishTaskDrag(false)
+      return
+    }
+    handleTaskDragOver(e, targetId)
+    finishTaskDrag(true)
   }
 
   const wordCount = notepadContent.trim().split(/\s+/).filter(w => w).length
@@ -347,20 +464,21 @@ export default function Tasks({ userId, onStatsChange, resetKey }) {
             </div>
           )}
 
-          {categories.length === 0 && (
+          {displayCategories.length === 0 && (
             <div className="text-center py-12 text-gray-600">
               <p className="text-sm">No tasks yet.</p>
               <button onClick={() => setShowNewCategoryForm(true)} className="mt-2 text-xs text-brand-accent hover:text-brand-accent-hover">+ Add your first section</button>
             </div>
           )}
 
-          {categories.map(cat => {
+          {displayCategories.map(cat => {
             const { done, total } = getProgress(cat)
             const isCollapsed = collapsedSections.includes(cat)
             return (
               <div
                 key={cat}
-                className={`mb-5 ${dragOverSectionCat === cat ? 'border-t-2 border-brand-accent' : ''}`}
+                ref={node => rememberLayoutNode(sectionLayoutRef, cat, node)}
+                className={`mb-5 ${dragOverSectionCat === cat ? 'ring-1 ring-brand-accent/60 rounded p-1 -m-1' : ''}`}
                 onDragOver={e => { if (dragSectionCat) handleSectionDragOver(e, cat) }}
                 onDrop={e => { if (dragSectionCat) handleSectionDrop(e, cat) }}
               >
@@ -370,7 +488,7 @@ export default function Tasks({ userId, onStatsChange, resetKey }) {
                     <div
                       draggable
                       onDragStart={e => handleSectionDragStart(e, cat)}
-                      onDragEnd={() => { setDragSectionCat(null); setDragOverSectionCat(null) }}
+                      onDragEnd={() => finishSectionDrag(true)}
                       className="cursor-grab text-gray-600 hover:text-gray-400 hidden sm:block"
                       title="Drag to reorder"
                     >
@@ -438,13 +556,14 @@ export default function Tasks({ userId, onStatsChange, resetKey }) {
                 {/* Task rows */}
                 {!isCollapsed && (
                   <div className="space-y-1.5">
-                    {tasks.filter(t => t.category === cat && !t.hidden).map(task => (
+                    {orderedVisibleTasks(cat).map(task => (
                       <div
                         key={task.id}
-                        className={`task-card bg-white/5 rounded overflow-hidden ${dragTaskId === task.id ? 'opacity-50' : ''} ${dragOverTaskId === task.id ? 'border-2 border-brand-accent' : ''} ${sendingComplete === task.id ? 'send-complete-animate' : ''} ${checkAnimating === task.id ? 'task-success-flash' : ''}`}
+                        ref={node => rememberLayoutNode(taskLayoutRef, task.id, node)}
+                        className={`task-card bg-white/5 rounded overflow-hidden ${dragTaskId === task.id ? 'opacity-50' : ''} ${dragOverTaskId === task.id ? 'ring-1 ring-brand-accent/70' : ''} ${sendingComplete === task.id ? 'send-complete-animate' : ''} ${checkAnimating === task.id ? 'task-success-flash' : ''}`}
                         onDragOver={e => handleTaskDragOver(e, task.id)}
                         onDrop={e => { if (dragTaskId) handleTaskDrop(e, task.id) }}
-                        onDragEnd={() => { setDragTaskId(null); setDragOverTaskId(null) }}
+                        onDragEnd={() => finishTaskDrag(true)}
                         onClick={() => setExpandedTask(expandedTask === task.id ? null : task.id)}
                       >
                         <div className="flex items-center gap-1 sm:gap-1 p-2.5 sm:p-3 cursor-pointer">

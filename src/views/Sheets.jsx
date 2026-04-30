@@ -8,6 +8,7 @@ import {
   MASTER_SOURCING_SHEET_NAME,
   useSheets,
 } from '../hooks/useSheets'
+import { animateLayoutShift, rememberLayoutNode } from '../lib/reorderAnimation'
 
 const Plus = () => <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
 const Trash = () => <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
@@ -77,40 +78,8 @@ function rowLayoutSignature(sheet) {
   return (sheet?.rows || []).map(row => row.id).join('|')
 }
 
-function rememberLayoutNode(ref, id, node) {
-  if (!id) return
-  if (node) ref.current.set(id, node)
-  else ref.current.delete(id)
-}
-
-function captureRects(ref) {
-  return new Map([...ref.current.entries()].map(([id, node]) => [id, node.getBoundingClientRect()]))
-}
-
-function animateLayoutShift(ref, update) {
-  const before = captureRects(ref)
-  update()
-  requestAnimationFrame(() => {
-    ref.current.forEach((node, id) => {
-      const first = before.get(id)
-      if (!first) return
-      const last = node.getBoundingClientRect()
-      const dx = first.left - last.left
-      const dy = first.top - last.top
-      if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return
-      node.style.transition = 'none'
-      node.style.transform = `translate(${dx}px, ${dy}px)`
-      node.style.willChange = 'transform'
-      requestAnimationFrame(() => {
-        node.style.transition = 'transform 150ms ease'
-        node.style.transform = ''
-        window.setTimeout(() => {
-          node.style.transition = ''
-          node.style.willChange = ''
-        }, 170)
-      })
-    })
-  })
+function sheetLayoutSignature(sheets) {
+  return (sheets || []).map(sheet => sheet.id).join('|')
 }
 
 function loadSheetOrder() {
@@ -551,8 +520,10 @@ export default function Sheets({ userId, resetKey, registerUndo, embedded = fals
   const undoStackRef = useRef([])
   const redoStackRef = useRef([])
   const sidebarResizeRef = useRef(null)
+  const dragSheetRef = useRef(null)
   const dragColumnRef = useRef(null)
   const dragRowRef = useRef(null)
+  const sheetLayoutRef = useRef(new Map())
   const columnLayoutRef = useRef(new Map())
   const rowLayoutRef = useRef(new Map())
 
@@ -983,9 +954,35 @@ export default function Sheets({ userId, resetKey, registerUndo, embedded = fals
 
   function startSheetDrag(e, sheetId) {
     setDragSheetId(sheetId)
+    dragSheetRef.current = {
+      sheetId,
+      latestSheets: localSheets,
+    }
     e.dataTransfer.effectAllowed = 'move'
     e.dataTransfer.setData('application/x-bw-drag', 'sheet')
     e.dataTransfer.setData('text/plain', sheetId)
+  }
+
+  function previewSheetDrop(e, targetSheetId) {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    const drag = dragSheetRef.current
+    if (!drag?.sheetId || !targetSheetId || drag.sheetId === targetSheetId) return
+    const current = drag.latestSheets || localSheets
+    const next = moveItem(current, drag.sheetId, targetSheetId)
+    if (sheetLayoutSignature(next) === sheetLayoutSignature(current)) return
+    animateLayoutShift(sheetLayoutRef, () => {
+      localSheetsRef.current = new Map(next.map(sheet => [sheet.id, sheet]))
+      drag.latestSheets = next
+      setLocalSheets(next)
+    })
+  }
+
+  function finishSheetDrag(save = true) {
+    const drag = dragSheetRef.current
+    setDragSheetId(null)
+    dragSheetRef.current = null
+    if (save && drag?.latestSheets) saveSheetOrder(drag.latestSheets)
   }
 
   function dropSheet(e, targetSheetId) {
@@ -994,14 +991,12 @@ export default function Sheets({ userId, resetKey, registerUndo, embedded = fals
     const type = e.dataTransfer.getData('application/x-bw-drag')
     if (type && type !== 'sheet') return
     const sourceId = e.dataTransfer.getData('text/plain') || dragSheetId
-    setDragSheetId(null)
-    if (!sourceId || !targetSheetId || sourceId === targetSheetId) return
-    setLocalSheets(prev => {
-      const next = moveItem(prev, sourceId, targetSheetId)
-      localSheetsRef.current = new Map(next.map(sheet => [sheet.id, sheet]))
-      saveSheetOrder(next)
-      return next
-    })
+    if (!sourceId || !targetSheetId) {
+      finishSheetDrag(false)
+      return
+    }
+    previewSheetDrop(e, targetSheetId)
+    finishSheetDrag(true)
   }
 
   function startRowDrag(e, rowId) {
@@ -1400,13 +1395,13 @@ export default function Sheets({ userId, resetKey, registerUndo, embedded = fals
                 const batchOpen = openBatchSheetId === sheet.id
                 const activeBatch = sheet.id === activeId && activeIsBatchProduction
                 return (
-                  <div key={sheet.id} className="relative group">
+                  <div key={sheet.id} ref={node => rememberLayoutNode(sheetLayoutRef, sheet.id, node)} className="relative group">
                     <button
                       draggable
                       onDragStart={e => startSheetDrag(e, sheet.id)}
-                      onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move' }}
+                      onDragOver={e => previewSheetDrop(e, sheet.id)}
                       onDrop={e => dropSheet(e, sheet.id)}
-                      onDragEnd={() => setDragSheetId(null)}
+                      onDragEnd={() => finishSheetDrag(true)}
                       onClick={() => {
                         if (batchSheet) {
                           setOpenBatchSheetId(id => id === sheet.id ? null : sheet.id)
