@@ -60,6 +60,12 @@ export function useMultiSelection(items, options = {}) {
 
   useEffect(() => { itemsRef.current = items }, [items])
   useEffect(() => { selectedRef.current = selectedIds }, [selectedIds])
+
+  const clearSelection = useCallback(() => {
+    setSelectedIds(new Set())
+    lastSelectedRef.current = null
+  }, [])
+
   useEffect(() => {
     if (!enabled) return undefined
     const clearFromOutsideClick = (event) => {
@@ -83,11 +89,6 @@ export function useMultiSelection(items, options = {}) {
 
   const selectedItems = useMemo(() => selectedArray(items, selectedIds, getId), [items, selectedIds, getId])
   const selectedCount = selectedIds.size
-
-  const clearSelection = useCallback(() => {
-    setSelectedIds(new Set())
-    lastSelectedRef.current = null
-  }, [])
 
   const selectAll = useCallback((sourceItems = itemsRef.current) => {
     const ids = sourceItems.map(getId)
