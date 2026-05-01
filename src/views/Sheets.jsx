@@ -329,12 +329,20 @@ function cellIsChecked(value) {
   return ['true', 'yes', 'y', '1', 'checked', 'in stock', 'stocked'].includes(String(value || '').trim().toLowerCase())
 }
 
+function cellIsPending(value) {
+  return ['pending', 'on order', 'ordered', 'otw', 'in transit'].includes(String(value || '').trim().toLowerCase())
+}
+
 function stockColumns(sheet) {
   return (sheet?.columns || []).filter(isStockColumn)
 }
 
 function rowHasCheckedStock(sheet, row) {
   return stockColumns(sheet).some(col => cellIsChecked(row?.cells?.[col.id]))
+}
+
+function rowHasPendingStock(sheet, row) {
+  return stockColumns(sheet).some(col => cellIsPending(row?.cells?.[col.id]))
 }
 
 function rowHasPrimaryContent(sheet, row) {
@@ -344,6 +352,7 @@ function rowHasPrimaryContent(sheet, row) {
 
 function rowIsOutOfStock(sheet, row) {
   if (!stockColumns(sheet).length || !rowHasPrimaryContent(sheet, row)) return false
+  if (rowHasPendingStock(sheet, row)) return false
   return !rowHasCheckedStock(sheet, row)
 }
 
@@ -450,17 +459,25 @@ function CellEditor({ value, onChange, onBlur, rows = 1, className = '', minHeig
 }
 
 function StockCell({ value, onChange, onBlur, className = '' }) {
-  const checked = cellIsChecked(value)
+  const state = cellIsChecked(value) ? 'TRUE' : cellIsPending(value) ? 'PENDING' : ''
+  const tone = state === 'TRUE'
+    ? 'text-brand-success'
+    : state === 'PENDING'
+      ? 'text-amber-300'
+      : 'text-red-300'
   return (
-    <label className={`flex items-center gap-2 min-h-[42px] px-2 py-1.5 rounded border border-white/10 bg-white/[0.03] text-xs ${checked ? 'text-brand-success' : 'text-red-300'} ${className}`}>
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={e => onChange(e.target.checked ? 'TRUE' : '')}
+    <label className={`flex items-center gap-2 min-h-[42px] px-2 py-1.5 rounded border border-white/10 bg-white/[0.03] text-xs ${tone} ${className}`}>
+      <select
+        value={state}
+        onChange={e => onChange(e.target.value)}
         onBlur={onBlur}
-        className="accent-brand-accent shrink-0"
-      />
-      <span className="truncate">{checked ? 'In stock' : 'Out'}</span>
+        className="w-full min-w-0 bg-transparent text-current outline-none cursor-pointer"
+        aria-label="Stock status"
+      >
+        <option value="">Out</option>
+        <option value="PENDING">Pending</option>
+        <option value="TRUE">In stock</option>
+      </select>
     </label>
   )
 }
@@ -867,7 +884,7 @@ export default function Sheets({ userId, resetKey, registerUndo, embedded = fals
     if (isStockColumn(col)) {
       return (
         <StockCell
-          value={rowHasCheckedStock(active, row) ? 'TRUE' : (row.cells[col.id] || '')}
+          value={rowHasCheckedStock(active, row) ? 'TRUE' : rowHasPendingStock(active, row) ? 'PENDING' : (row.cells[col.id] || '')}
           onChange={value => updateStockCell(row.id, col.id, value)}
           onBlur={() => saveSheetNow(active.id)}
           className={className}

@@ -210,10 +210,16 @@ function truthyStock(value) {
   return ['true', 'yes', 'y', '1', 'checked', 'in stock', 'stocked'].includes(normalized)
 }
 
+function pendingStock(value) {
+  const normalized = String(value || '').trim().toLowerCase()
+  return ['pending', 'on order', 'ordered', 'otw', 'in transit'].includes(normalized)
+}
+
 function stockFromInventory(values) {
   const available = parseFloat(values.Available || values['On Hand'] || '')
   if (Number.isFinite(available) && available > 0) return 'TRUE'
   if (truthyStock(values['IN STOCK'])) return 'TRUE'
+  if (pendingStock(values['IN STOCK']) || pendingStock(values['Reorder Status']) || pendingStock(values.Status)) return 'PENDING'
   return ''
 }
 
