@@ -350,16 +350,22 @@ function rowHasPrimaryContent(sheet, row) {
     .some(name => String(cellByName(sheet, row, name) || '').trim())
 }
 
-function rowIsOutOfStock(sheet, row) {
-  if (!stockColumns(sheet).length || !rowHasPrimaryContent(sheet, row)) return false
-  if (rowHasPendingStock(sheet, row)) return false
-  return !rowHasCheckedStock(sheet, row)
+function rowStockState(sheet, row) {
+  if (!stockColumns(sheet).length || !rowHasPrimaryContent(sheet, row)) return 'none'
+  if (rowHasCheckedStock(sheet, row)) return 'in'
+  if (rowHasPendingStock(sheet, row)) return 'pending'
+  return 'out'
 }
 
-function outOfStockStyle(enabled) {
-  return enabled
-    ? { boxShadow: 'inset 0 0 0 1px rgba(239, 68, 68, 0.42), inset 3px 0 0 rgba(239, 68, 68, 0.85)' }
-    : undefined
+function stockRowStyle(state, enabled) {
+  if (!enabled) return undefined
+  if (state === 'out') {
+    return { boxShadow: 'inset 0 0 0 1px rgba(239, 68, 68, 0.42), inset 3px 0 0 rgba(239, 68, 68, 0.85)' }
+  }
+  if (state === 'pending') {
+    return { boxShadow: 'inset 0 0 0 1px rgba(245, 158, 11, 0.44), inset 3px 0 0 rgba(245, 158, 11, 0.88)' }
+  }
+  return undefined
 }
 
 function rowHeight(row) {
@@ -1836,7 +1842,7 @@ export default function Sheets({ userId, resetKey, registerUndo, embedded = fals
                   </div>
 
                   {visibleRows.map((row, rowIndex) => {
-                    const outOfStock = rowIsOutOfStock(active, row)
+                    const stockState = rowStockState(active, row)
                     const selected = rowSelection.isSelected(row.id)
                     const rowPixels = rowHeight(row)
                     return (
@@ -1848,8 +1854,8 @@ export default function Sheets({ userId, resetKey, registerUndo, embedded = fals
                         }}
                       >
                         <div
-                          className={`relative grid gap-1 border-b hover:bg-white/[0.025] rounded-sm ${selected ? 'ring-1 ring-brand-accent/70 bg-brand-accent/[0.06]' : ''} ${dragRowId === row.id ? 'ring-1 ring-brand-accent/50 bg-brand-accent/[0.04]' : ''} ${outOfStock ? 'border-white/5 bg-red-500/[0.035]' : 'border-white/5'}`}
-                          style={{ gridTemplateColumns: gridTemplate, minHeight: rowPixels, ...outOfStockStyle(outOfStock && !selected) }}
+                          className={`relative grid gap-1 border-b hover:bg-white/[0.025] rounded-sm ${selected ? 'ring-1 ring-brand-accent/70 bg-brand-accent/[0.06]' : ''} ${dragRowId === row.id ? 'ring-1 ring-brand-accent/50 bg-brand-accent/[0.04]' : ''} ${stockState === 'out' ? 'border-white/5 bg-red-500/[0.035]' : stockState === 'pending' ? 'border-white/5 bg-amber-500/[0.05]' : 'border-white/5'}`}
+                          style={{ gridTemplateColumns: gridTemplate, minHeight: rowPixels, ...stockRowStyle(stockState, !selected) }}
                           onDragOver={e => previewRowDrop(e, row.id)}
                           onDrop={e => dropRow(e, row.id)}
                         >
@@ -1908,7 +1914,7 @@ export default function Sheets({ userId, resetKey, registerUndo, embedded = fals
 
               <div className="sm:hidden flex-1 overflow-y-auto min-h-0 space-y-3 pr-0.5" style={{ WebkitOverflowScrolling: 'touch' }}>
                 {visibleRows.map((row, rowIndex) => {
-                  const outOfStock = rowIsOutOfStock(active, row)
+                  const stockState = rowStockState(active, row)
                   const selected = rowSelection.isSelected(row.id)
                   return (
                     <div
@@ -1919,8 +1925,8 @@ export default function Sheets({ userId, resetKey, registerUndo, embedded = fals
                         columnSelection.clearSelection()
                         rowSelection.handleItemClick(e, row)
                       }}
-                      className={`bg-white/[0.04] border rounded-lg p-3 ${selected ? 'border-brand-accent/70 ring-1 ring-brand-accent/60 bg-brand-accent/10' : outOfStock ? 'border-white/10 bg-red-500/[0.04]' : 'border-white/10'}`}
-                      style={outOfStockStyle(outOfStock && !selected)}
+                      className={`bg-white/[0.04] border rounded-lg p-3 ${selected ? 'border-brand-accent/70 ring-1 ring-brand-accent/60 bg-brand-accent/10' : stockState === 'out' ? 'border-white/10 bg-red-500/[0.04]' : stockState === 'pending' ? 'border-white/10 bg-amber-500/[0.06]' : 'border-white/10'}`}
+                      style={stockRowStyle(stockState, !selected)}
                     >
                       <div className="flex items-center justify-between gap-2">
                         <button
