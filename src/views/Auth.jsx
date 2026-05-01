@@ -33,7 +33,7 @@ export default function Auth() {
       <div className="w-full max-w-sm">
         {/* Logo / Title */}
         <div className="text-center mb-8">
-          <h1 style={{ fontFamily: "'Albert Sans', Arial, sans-serif", letterSpacing: '0.14em' }} className="text-3xl font-bold text-white uppercase">Beyond Wellness</h1>
+          <h1 style={{ fontFamily: "'Albert Sans', Arial, sans-serif", letterSpacing: '0.14em' }} className="text-3xl font-bold text-white uppercase">REQUIEM</h1>
         </div>
 
         {/* Card */}
