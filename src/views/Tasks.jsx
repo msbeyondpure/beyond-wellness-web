@@ -2,6 +2,7 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
 import { useTasks } from '../hooks/useTasks'
 import { useNotepad } from '../hooks/useNotepad'
+import { formatNoteTitle, todayKey, useSavedNotes } from '../hooks/useSavedNotes'
 import { animateLayoutShift, rememberLayoutNode } from '../lib/reorderAnimation'
 import SelectionBar from '../components/SelectionBar'
 import { copyToClipboard, isEditingTarget, useMultiSelection } from '../hooks/useMultiSelection'
@@ -14,6 +15,10 @@ const CheckCircle = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="
 const GripV = () => <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="9" cy="6" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="18" r="1.5"/></svg>
 const ChevronRight = () => <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="9 18 15 12 9 6"/></svg>
 const CollapseLeft = () => <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 18 9 12 15 6"/></svg>
+const ArchiveIcon = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="4" rx="1"/><path d="M5 7v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7"/><path d="M10 12h4"/></svg>
+const FileText = () => <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/></svg>
+const CalendarIcon = () => <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/></svg>
+const XIcon = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
 
 function playSound(type) {
   try {
@@ -74,9 +79,107 @@ function replaceCategoryTasks(allTasks, category, orderedCategoryTasks) {
   })
 }
 
+function SavedNotesPopup({ open, notes, tree, selectedId, onSelect, onClose, onSave, onDelete, onToday }) {
+  const activeNote = notes.find(note => note.id === selectedId) || notes[0] || null
+  const [draft, setDraft] = useState('')
+
+  useEffect(() => {
+    setDraft(activeNote?.content || '')
+  }, [activeNote?.id, activeNote?.content])
+
+  if (!open) return null
+
+  const saveDraft = () => {
+    if (!activeNote) return
+    onSave({ ...activeNote, content: draft, updated_at: new Date().toISOString() })
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/70 p-0 sm:p-4" onMouseDown={onClose}>
+      <div
+        className="glass-card w-full sm:max-w-5xl h-[88vh] sm:h-[78vh] rounded-t-2xl sm:rounded-lg border border-white/10 overflow-hidden flex flex-col animate-scaleIn"
+        onMouseDown={e => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-white/10">
+          <div className="min-w-0">
+            <h3 className="text-sm font-semibold text-white flex items-center gap-2"><ArchiveIcon /> Saved Notes</h3>
+            <p className="text-[11px] text-gray-500 mt-0.5">Daily notes archive</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button onClick={onToday} className="px-2.5 py-1.5 rounded bg-white/10 text-gray-200 text-xs hover:bg-white/15 flex items-center gap-1.5">
+              <CalendarIcon /> Today
+            </button>
+            <button onClick={onClose} className="p-2 rounded text-gray-400 hover:text-white hover:bg-white/10" title="Close saved notes" aria-label="Close saved notes">
+              <XIcon />
+            </button>
+          </div>
+        </div>
+
+        <div className="flex-1 min-h-0 flex flex-col sm:flex-row">
+          <aside className="sm:w-64 border-b sm:border-b-0 sm:border-r border-white/10 p-2 overflow-y-auto max-h-52 sm:max-h-none">
+            {!notes.length ? (
+              <div className="p-3 text-xs text-gray-500">No saved notes yet.</div>
+            ) : tree.map(year => (
+              <div key={year.year} className="mb-2">
+                <div className="px-2 py-1 text-[11px] font-semibold text-gray-500 uppercase tracking-wide">{year.year}</div>
+                {year.months.map(month => (
+                  <div key={`${year.year}-${month.month}`} className="mb-1">
+                    <div className="px-2 py-1 text-xs text-gray-400">{month.month}</div>
+                    <div className="space-y-1">
+                      {month.notes.map(note => (
+                        <button
+                          key={note.id}
+                          onClick={() => onSelect(note.id)}
+                          className={`w-full text-left px-2 py-2 rounded text-xs flex items-center gap-2 transition-all ${activeNote?.id === note.id ? 'bg-brand-accent/15 text-brand-accent border border-brand-accent/20' : 'text-gray-300 hover:bg-white/10 border border-transparent'}`}
+                        >
+                          <FileText />
+                          <span className="min-w-0 truncate">{note.title || formatNoteTitle(note.date)}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </aside>
+
+          <main className="flex-1 min-h-0 flex flex-col">
+            {activeNote ? (
+              <>
+                <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-white truncate">{activeNote.title || formatNoteTitle(activeNote.date)}</div>
+                    <div className="text-[11px] text-gray-500">{activeNote.date}</div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button onClick={saveDraft} className="btn-primary px-3 py-1.5 rounded text-xs text-white">Save</button>
+                    <button onClick={() => onDelete(activeNote.id)} className="px-2.5 py-1.5 rounded text-xs text-red-300 bg-red-500/10 hover:bg-red-500/20">Delete</button>
+                  </div>
+                </div>
+                <textarea
+                  value={draft}
+                  onChange={e => setDraft(e.target.value)}
+                  onBlur={saveDraft}
+                  className="flex-1 min-h-0 bg-transparent p-4 text-sm leading-6 text-gray-200 placeholder-gray-600 resize-none outline-none"
+                  placeholder="Daily note..."
+                />
+              </>
+            ) : (
+              <div className="flex-1 flex items-center justify-center p-8 text-center text-sm text-gray-500">
+                Save highlighted text or the full notepad to create a daily note.
+              </div>
+            )}
+          </main>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function Tasks({ userId, onStatsChange, resetKey }) {
   const { tasks, loading, addTask, updateTask, deleteTask, restoreTask, categoryOrder, setCategoryOrder } = useTasks(userId)
   const { content: notepadContent, updateContent } = useNotepad(userId)
+  const { notes: savedNotes, tree: savedNotesTree, saveNote, deleteNote, getOrCreateDailyNote, appendToDailyNote } = useSavedNotes(userId)
 
   const [expandedTask, setExpandedTask] = useState(null)
   const [showNewTaskForm, setShowNewTaskForm] = useState(null)
@@ -105,6 +208,9 @@ export default function Tasks({ userId, onStatsChange, resetKey }) {
     const s = localStorage.getItem('bwNotepadHeight'); return s ? parseInt(s) : 420
   })
   const [showMobileNotepad, setShowMobileNotepad] = useState(false)
+  const [showSavedNotes, setShowSavedNotes] = useState(false)
+  const [activeSavedNoteId, setActiveSavedNoteId] = useState(null)
+  const [savedNoteFlash, setSavedNoteFlash] = useState('')
   const notepadRef = useRef(null)
   const taskLayoutRef = useRef(new Map())
   const sectionLayoutRef = useRef(new Map())
@@ -398,6 +504,33 @@ export default function Tasks({ userId, onStatsChange, resetKey }) {
     finishTaskDrag(true)
   }
 
+  function selectedNotepadText() {
+    const node = notepadRef.current
+    if (!node) return ''
+    const start = Number(node.selectionStart)
+    const end = Number(node.selectionEnd)
+    return end > start ? node.value.slice(start, end) : ''
+  }
+
+  async function openTodaySavedNote() {
+    const note = await getOrCreateDailyNote(todayKey())
+    setActiveSavedNoteId(note.id)
+    setShowSavedNotes(true)
+  }
+
+  async function addToSavedNotes(source = 'auto') {
+    const selected = selectedNotepadText()
+    const content = source === 'full' ? notepadContent : selected || notepadContent
+    const note = await appendToDailyNote(content)
+    if (!note) {
+      setSavedNoteFlash('Nothing to save')
+    } else {
+      setActiveSavedNoteId(note.id)
+      setSavedNoteFlash(selected && source !== 'full' ? 'Selection saved' : 'Notepad saved')
+    }
+    setTimeout(() => setSavedNoteFlash(''), 1800)
+  }
+
   const wordCount = notepadContent.trim().split(/\s+/).filter(w => w).length
 
   if (loading) return (
@@ -433,6 +566,12 @@ export default function Tasks({ userId, onStatsChange, resetKey }) {
                   Notepad
                 </h3>
                 <div className="flex gap-1">
+                  <button onClick={() => addToSavedNotes('auto')} className="p-1 text-gray-500 hover:text-brand-accent hover:bg-white/10 rounded transition-all" title="Add selection or notepad to saved notes">
+                    <ArchiveIcon />
+                  </button>
+                  <button onClick={() => setShowSavedNotes(true)} className="p-1 text-gray-500 hover:text-white hover:bg-white/10 rounded transition-all" title="Open saved notes">
+                    <FileText />
+                  </button>
                   <button onClick={() => setNotepadCollapsed(true)} className="p-1 text-gray-500 hover:text-white hover:bg-white/10 rounded transition-all" title="Collapse">
                     <CollapseLeft />
                   </button>
@@ -453,7 +592,7 @@ export default function Tasks({ userId, onStatsChange, resetKey }) {
                 >
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="8" y1="8" x2="16" y2="8"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="8" y1="16" x2="16" y2="16"/></svg>
                 </div>
-                <div className="text-[10px] text-gray-600">{wordCount} word{wordCount !== 1 ? 's' : ''}</div>
+                <div className="text-[10px] text-gray-600">{savedNoteFlash || `${wordCount} word${wordCount !== 1 ? 's' : ''}`}</div>
               </div>
             </div>
           )}
@@ -477,6 +616,12 @@ export default function Tasks({ userId, onStatsChange, resetKey }) {
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
                 Notes
+              </button>
+              <button
+                onClick={() => setShowSavedNotes(true)}
+                className="px-2.5 sm:px-3 py-2 sm:py-1.5 bg-white/10 text-gray-300 rounded text-xs sm:text-sm font-medium flex items-center gap-1 hover:bg-white/20 active:bg-white/20 transition-all"
+              >
+                <ArchiveIcon /> <span className="hidden sm:inline">Saved Notes</span><span className="sm:hidden">Saved</span>
               </button>
               <button
                 onClick={() => setShowCompleted(v => !v)}
@@ -726,6 +871,7 @@ export default function Tasks({ userId, onStatsChange, resetKey }) {
               </button>
             </div>
             <textarea
+              ref={notepadRef}
               value={notepadContent}
               onChange={e => updateContent(e.target.value)}
               placeholder={"Quick notes...\n\nJot anything down here."}
@@ -733,11 +879,33 @@ export default function Tasks({ userId, onStatsChange, resetKey }) {
               autoFocus
             />
             <div className="px-4 py-2 text-xs text-gray-600 border-t border-white/5">
-              {wordCount} word{wordCount !== 1 ? 's' : ''}
+              <div className="flex items-center justify-between gap-2">
+                <span>{savedNoteFlash || `${wordCount} word${wordCount !== 1 ? 's' : ''}`}</span>
+                <span className="flex items-center gap-1">
+                  <button onClick={() => addToSavedNotes('auto')} className="px-2 py-1 rounded bg-white/10 text-gray-300">Save</button>
+                  <button onClick={() => setShowSavedNotes(true)} className="px-2 py-1 rounded bg-white/10 text-gray-300">Saved</button>
+                </span>
+              </div>
             </div>
           </div>
         </div>
       )}
+
+      <SavedNotesPopup
+        open={showSavedNotes}
+        notes={savedNotes}
+        tree={savedNotesTree}
+        selectedId={activeSavedNoteId}
+        onSelect={setActiveSavedNoteId}
+        onClose={() => setShowSavedNotes(false)}
+        onSave={saveNote}
+        onDelete={async id => {
+          await deleteNote(id)
+          const next = savedNotes.find(note => note.id !== id)
+          setActiveSavedNoteId(next?.id || null)
+        }}
+        onToday={openTodaySavedNote}
+      />
     </div>
   )
 }
