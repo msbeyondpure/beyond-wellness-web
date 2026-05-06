@@ -237,6 +237,7 @@ export default function Tasks({ userId, onStatsChange, resetKey, registerUndo })
   const [savedNoteFlash, setSavedNoteFlash] = useState('')
   const notepadRef = useRef(null)
   const tasksLayoutRef = useRef(null)
+  const notepadShellRef = useRef(null)
   const notepadContentRef = useRef('')
   const notepadUndoRef = useRef([])
   const notepadRedoRef = useRef([])
@@ -503,16 +504,38 @@ export default function Tasks({ userId, onStatsChange, resetKey, registerUndo })
     setCollapsedSections(prev => prev.includes(cat) ? prev.filter(c => c !== cat) : [...prev, cat])
   }
 
+  const maxNotepadHeight = () => {
+    if (typeof window === 'undefined') return 720
+    const top = notepadShellRef.current?.getBoundingClientRect?.().top ?? 72
+    return Math.max(300, window.innerHeight - top - 14)
+  }
+
+  const persistNotepadHeight = (height) => {
+    const next = Math.round(clamp(height, 240, maxNotepadHeight()))
+    setNotepadHeight(next)
+    localStorage.setItem('bwNotepadHeight', String(next))
+  }
+
   // Notepad resize
   const startNotepadResize = (e) => {
     e.preventDefault()
-    const startY = e.clientY; const startH = notepadHeight
-    const onMove = (e) => {
-      const h = Math.max(180, startH + (e.clientY - startY))
-      setNotepadHeight(h); localStorage.setItem('bwNotepadHeight', h)
+    const startY = e.clientY
+    const startH = notepadHeight
+    const prevCursor = document.body.style.cursor
+    const prevSelect = document.body.style.userSelect
+    document.body.style.cursor = 'row-resize'
+    document.body.style.userSelect = 'none'
+    const onMove = (event) => {
+      persistNotepadHeight(startH + (event.clientY - startY))
     }
-    const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp) }
-    document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp)
+    const onUp = () => {
+      document.body.style.cursor = prevCursor
+      document.body.style.userSelect = prevSelect
+      document.removeEventListener('pointermove', onMove)
+      document.removeEventListener('pointerup', onUp)
+    }
+    document.addEventListener('pointermove', onMove)
+    document.addEventListener('pointerup', onUp)
   }
 
   const startHorizontalResize = (e) => {
@@ -545,7 +568,7 @@ export default function Tasks({ userId, onStatsChange, resetKey, registerUndo })
     e.preventDefault()
     const startY = e.clientY
     const startH = notepadSavedNotesHeight
-    const maxH = Math.max(110, notepadHeight - 215)
+    const maxH = Math.max(120, notepadHeight - 205)
     const prevCursor = document.body.style.cursor
     const prevSelect = document.body.style.userSelect
     document.body.style.cursor = 'row-resize'
@@ -564,6 +587,21 @@ export default function Tasks({ userId, onStatsChange, resetKey, registerUndo })
     document.addEventListener('pointermove', onMove)
     document.addEventListener('pointerup', onUp)
   }
+
+  useEffect(() => {
+    if (!activeSavedNoteId || notepadCollapsed) return
+    const targetListHeight = 340
+    const targetHeight = Math.min(maxNotepadHeight(), 655)
+    if (notepadSavedNotesHeight < targetListHeight) {
+      const nextListHeight = Math.min(targetListHeight, Math.max(120, targetHeight - 205))
+      setNotepadSavedNotesHeight(nextListHeight)
+      localStorage.setItem('bwNotepadSavedNotesHeight', String(nextListHeight))
+    }
+    if (notepadHeight < targetHeight) {
+      persistNotepadHeight(targetHeight)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSavedNoteId, notepadCollapsed])
 
   function orderedVisibleTasks(cat, source = displayTasks) {
     return source
@@ -743,7 +781,8 @@ export default function Tasks({ userId, onStatsChange, resetKey, registerUndo })
 
         {/* ── Notepad (LEFT on desktop, hidden on mobile — accessed via button) ── */}
         <div
-          className={`notepad-section glass-card rounded transition-all hidden sm:block ${notepadCollapsed ? 'w-10 flex-shrink-0' : 'sm:min-w-[250px] sm:max-w-[46%]'}`}
+          ref={notepadShellRef}
+          className={`notepad-section glass-card rounded transition-all hidden sm:block ${notepadCollapsed ? 'w-10 flex-shrink-0' : 'sm:min-w-[250px] sm:max-w-[46%] overflow-hidden'}`}
           style={notepadCollapsed ? { alignSelf: 'flex-start' } : { alignSelf: 'flex-start', flex: `0 0 ${notepadWidth}%` }}
         >
           {notepadCollapsed ? (
@@ -785,13 +824,7 @@ export default function Tasks({ userId, onStatsChange, resetKey, registerUndo })
                 className="flex-1 min-h-[130px] w-full p-2 bg-white/5 border border-white/10 rounded text-gray-300 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-brand-accent placeholder-gray-600 custom-scrollbar"
               />
               <div className="flex items-center justify-between mt-2 flex-shrink-0">
-                <div
-                  onMouseDown={startNotepadResize}
-                  className="flex items-center gap-1 text-gray-600 hover:text-gray-400 cursor-row-resize select-none transition-colors"
-                  title="Drag to resize"
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="8" y1="8" x2="16" y2="8"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="8" y1="16" x2="16" y2="16"/></svg>
-                </div>
+                <div className="text-[10px] text-gray-700">Drag bottom edge to resize</div>
                 <div className="text-[10px] text-gray-600">{savedNoteFlash || `${wordCount} word${wordCount !== 1 ? 's' : ''}`}</div>
               </div>
               <div
@@ -811,6 +844,13 @@ export default function Tasks({ userId, onStatsChange, resetKey, registerUndo })
                 className="flex-shrink-0"
                 style={{ height: clampedSavedNotesHeight }}
               />
+              <div
+                onPointerDown={startNotepadResize}
+                className="-mx-4 -mb-4 mt-2 h-5 flex items-center justify-center cursor-row-resize select-none group flex-shrink-0 bg-black/10 hover:bg-brand-accent/5 transition-colors"
+                title="Drag to resize notepad vertically"
+              >
+                <div className="h-1 w-16 rounded-full bg-white/10 group-hover:bg-brand-accent/70 transition-colors" />
+              </div>
             </div>
           )}
         </div>
