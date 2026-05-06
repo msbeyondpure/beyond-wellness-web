@@ -8,6 +8,7 @@ import SelectionBar from '../components/SelectionBar'
 import { copyToClipboard, isEditingTarget, useMultiSelection } from '../hooks/useMultiSelection'
 
 const NOTEPAD_HISTORY_LIMIT = 50
+const clamp = (value, min, max) => Math.min(max, Math.max(min, value))
 
 // Icons
 const Plus = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -88,7 +89,7 @@ function notePreview(content) {
   return clean || 'Empty saved note'
 }
 
-function SavedNotesList({ notes, selectedId, onSelect, onSave, onDelete, onToday, className = '' }) {
+function SavedNotesList({ notes, selectedId, onSelect, onSave, onDelete, onToday, className = '', style }) {
   const activeNote = selectedId ? notes.find(note => note.id === selectedId) : null
   const activeNoteContent = activeNote?.content || ''
   const activeNoteDate = activeNote?.date || ''
@@ -112,7 +113,7 @@ function SavedNotesList({ notes, selectedId, onSelect, onSave, onDelete, onToday
   }
 
   return (
-    <div className={`saved-notes-list flex flex-col min-h-0 ${className}`}>
+    <div className={`saved-notes-list flex flex-col min-h-0 ${className}`} style={style}>
       <div className="flex items-center justify-between gap-2 mb-2 flex-shrink-0">
         <div className="min-w-0">
           <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wide flex items-center gap-1.5">
@@ -128,7 +129,7 @@ function SavedNotesList({ notes, selectedId, onSelect, onSave, onDelete, onToday
         </button>
       </div>
 
-      <div className="space-y-1.5 overflow-y-auto pr-1 min-h-0">
+      <div className="space-y-1.5 overflow-y-auto pr-1 min-h-0 custom-scrollbar">
         {!notes.length ? (
           <div className="task-card bg-white/5 rounded p-3 text-xs text-gray-500 border border-white/5">
             Saved notes appear here after saving highlighted text or the notepad.
@@ -177,7 +178,7 @@ function SavedNotesList({ notes, selectedId, onSelect, onSave, onDelete, onToday
                     value={draft}
                     onChange={e => setDraft(e.target.value)}
                     onBlur={saveDraft}
-                    className="w-full min-h-[120px] p-2 bg-white/5 border border-white/10 rounded text-gray-300 text-sm resize-y focus:outline-none focus:ring-1 focus:ring-brand-accent placeholder-gray-600"
+                    className="w-full min-h-[120px] p-2 bg-white/5 border border-white/10 rounded text-gray-300 text-sm resize-y focus:outline-none focus:ring-1 focus:ring-brand-accent placeholder-gray-600 custom-scrollbar"
                     placeholder="Daily note..."
                   />
                   <div className="flex items-center justify-end gap-2 mt-2">
@@ -225,10 +226,17 @@ export default function Tasks({ userId, onStatsChange, resetKey, registerUndo })
   const [notepadHeight, setNotepadHeight] = useState(() => {
     const s = localStorage.getItem('bwNotepadHeight'); return s ? parseInt(s) : 420
   })
+  const [notepadWidth, setNotepadWidth] = useState(() => {
+    const s = localStorage.getItem('bwTasksNotepadWidth'); return s ? parseFloat(s) : 20
+  })
+  const [notepadSavedNotesHeight, setNotepadSavedNotesHeight] = useState(() => {
+    const s = localStorage.getItem('bwNotepadSavedNotesHeight'); return s ? parseInt(s) : 165
+  })
   const [showMobileNotepad, setShowMobileNotepad] = useState(false)
   const [activeSavedNoteId, setActiveSavedNoteId] = useState(null)
   const [savedNoteFlash, setSavedNoteFlash] = useState('')
   const notepadRef = useRef(null)
+  const tasksLayoutRef = useRef(null)
   const notepadContentRef = useRef('')
   const notepadUndoRef = useRef([])
   const notepadRedoRef = useRef([])
@@ -507,6 +515,56 @@ export default function Tasks({ userId, onStatsChange, resetKey, registerUndo })
     document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp)
   }
 
+  const startHorizontalResize = (e) => {
+    if (notepadCollapsed) return
+    e.preventDefault()
+    const rect = tasksLayoutRef.current?.getBoundingClientRect()
+    if (!rect?.width) return
+    const startX = e.clientX
+    const startW = rect.width * (notepadWidth / 100)
+    const prevCursor = document.body.style.cursor
+    const prevSelect = document.body.style.userSelect
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+    const onMove = (event) => {
+      const next = clamp(((startW + event.clientX - startX) / rect.width) * 100, 14, 46)
+      setNotepadWidth(next)
+      localStorage.setItem('bwTasksNotepadWidth', String(next))
+    }
+    const onUp = () => {
+      document.body.style.cursor = prevCursor
+      document.body.style.userSelect = prevSelect
+      document.removeEventListener('pointermove', onMove)
+      document.removeEventListener('pointerup', onUp)
+    }
+    document.addEventListener('pointermove', onMove)
+    document.addEventListener('pointerup', onUp)
+  }
+
+  const startSavedNotesResize = (e) => {
+    e.preventDefault()
+    const startY = e.clientY
+    const startH = notepadSavedNotesHeight
+    const maxH = Math.max(110, notepadHeight - 215)
+    const prevCursor = document.body.style.cursor
+    const prevSelect = document.body.style.userSelect
+    document.body.style.cursor = 'row-resize'
+    document.body.style.userSelect = 'none'
+    const onMove = (event) => {
+      const next = clamp(startH - (event.clientY - startY), 95, maxH)
+      setNotepadSavedNotesHeight(next)
+      localStorage.setItem('bwNotepadSavedNotesHeight', String(next))
+    }
+    const onUp = () => {
+      document.body.style.cursor = prevCursor
+      document.body.style.userSelect = prevSelect
+      document.removeEventListener('pointermove', onMove)
+      document.removeEventListener('pointerup', onUp)
+    }
+    document.addEventListener('pointermove', onMove)
+    document.addEventListener('pointerup', onUp)
+  }
+
   function orderedVisibleTasks(cat, source = displayTasks) {
     return source
       .filter(t => t.category === cat && !t.hidden)
@@ -677,15 +735,16 @@ export default function Tasks({ userId, onStatsChange, resetKey, registerUndo })
   )
 
   const completedTasks = tasks.filter(t => t.completed)
+  const clampedSavedNotesHeight = Math.min(notepadSavedNotesHeight, Math.max(105, notepadHeight - 215))
 
   return (
     <div className="p-3 pt-4 sm:p-4 sm:pt-6 animate-fadeIn">
-      <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 w-full max-w-none mx-0">
+      <div ref={tasksLayoutRef} className="flex flex-col sm:flex-row gap-3 sm:gap-4 w-full max-w-none mx-0">
 
         {/* ── Notepad (LEFT on desktop, hidden on mobile — accessed via button) ── */}
         <div
-          className={`notepad-section glass-card rounded transition-all hidden sm:block ${notepadCollapsed ? 'w-10 flex-shrink-0' : 'sm:flex-[0_1_20%] sm:min-w-[260px] sm:max-w-[380px]'}`}
-          style={{ alignSelf: 'flex-start' }}
+          className={`notepad-section glass-card rounded transition-all hidden sm:block ${notepadCollapsed ? 'w-10 flex-shrink-0' : 'sm:min-w-[250px] sm:max-w-[46%]'}`}
+          style={notepadCollapsed ? { alignSelf: 'flex-start' } : { alignSelf: 'flex-start', flex: `0 0 ${notepadWidth}%` }}
         >
           {notepadCollapsed ? (
             <button
@@ -723,7 +782,7 @@ export default function Tasks({ userId, onStatsChange, resetKey, registerUndo })
                 onBlur={commitNotepadSession}
                 onKeyDown={handleNotepadKeyDown}
                 placeholder={"Quick notes...\n\nJot anything down here."}
-                className="flex-1 min-h-[150px] w-full p-2 bg-white/5 border border-white/10 rounded text-gray-300 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-brand-accent placeholder-gray-600"
+                className="flex-1 min-h-[130px] w-full p-2 bg-white/5 border border-white/10 rounded text-gray-300 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-brand-accent placeholder-gray-600 custom-scrollbar"
               />
               <div className="flex items-center justify-between mt-2 flex-shrink-0">
                 <div
@@ -735,6 +794,13 @@ export default function Tasks({ userId, onStatsChange, resetKey, registerUndo })
                 </div>
                 <div className="text-[10px] text-gray-600">{savedNoteFlash || `${wordCount} word${wordCount !== 1 ? 's' : ''}`}</div>
               </div>
+              <div
+                onPointerDown={startSavedNotesResize}
+                className="my-2 h-3 flex items-center justify-center cursor-row-resize select-none group flex-shrink-0"
+                title="Drag to resize notepad and saved notes"
+              >
+                <div className="h-px w-full bg-white/10 group-hover:bg-brand-accent/50 transition-colors" />
+              </div>
               <SavedNotesList
                 notes={savedNotes}
                 selectedId={activeSavedNoteId}
@@ -742,11 +808,23 @@ export default function Tasks({ userId, onStatsChange, resetKey, registerUndo })
                 onSave={saveNote}
                 onDelete={handleDeleteSavedNote}
                 onToday={openTodaySavedNote}
-                className="mt-3 flex-shrink-0 max-h-[44%]"
+                className="flex-shrink-0"
+                style={{ height: clampedSavedNotesHeight }}
               />
             </div>
           )}
         </div>
+
+        {!notepadCollapsed && (
+          <div
+            className="hidden sm:flex w-2 -mx-1 items-stretch justify-center cursor-col-resize select-none group"
+            onPointerDown={startHorizontalResize}
+            title="Drag to resize Notepad and Tasks"
+            aria-label="Resize Notepad and Tasks"
+          >
+            <div className="w-px rounded-full bg-white/10 group-hover:bg-brand-accent/70 transition-colors" />
+          </div>
+        )}
 
         {/* ── Tasks (RIGHT on desktop, full-width on mobile) ── */}
         <div
@@ -983,7 +1061,7 @@ export default function Tasks({ userId, onStatsChange, resetKey, registerUndo })
                                 defaultValue={task.notes || ''}
                                 onBlur={e => updateTask(task.id, { notes: e.target.value })}
                                 placeholder="Add notes..."
-                                className="w-full p-2 bg-white/5 border border-white/10 rounded text-gray-300 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-brand-accent"
+                                className="w-full p-2 bg-white/5 border border-white/10 rounded text-gray-300 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-brand-accent custom-scrollbar"
                                 rows={3}
                                 onMouseDown={e => e.stopPropagation()}
                               />
@@ -1027,9 +1105,16 @@ export default function Tasks({ userId, onStatsChange, resetKey, registerUndo })
               onBlur={commitNotepadSession}
               onKeyDown={handleNotepadKeyDown}
               placeholder={"Quick notes...\n\nJot anything down here."}
-              className="flex-1 min-h-[150px] w-full p-4 bg-transparent text-gray-300 text-base resize-none focus:outline-none placeholder-gray-600"
+              className="flex-1 min-h-[150px] w-full p-4 bg-transparent text-gray-300 text-base resize-none focus:outline-none placeholder-gray-600 custom-scrollbar"
               autoFocus
             />
+            <div
+              onPointerDown={startSavedNotesResize}
+              className="mx-4 h-3 flex items-center justify-center cursor-row-resize select-none group flex-shrink-0"
+              title="Drag to resize notepad and saved notes"
+            >
+              <div className="h-px w-full bg-white/10 group-active:bg-brand-accent/60 transition-colors" />
+            </div>
             <SavedNotesList
               notes={savedNotes}
               selectedId={activeSavedNoteId}
@@ -1037,7 +1122,8 @@ export default function Tasks({ userId, onStatsChange, resetKey, registerUndo })
               onSave={saveNote}
               onDelete={handleDeleteSavedNote}
               onToday={openTodaySavedNote}
-              className="px-4 pb-3 flex-shrink-0 max-h-[38vh]"
+              className="px-4 pb-3 flex-shrink-0"
+              style={{ height: clampedSavedNotesHeight }}
             />
             <div className="px-4 py-2 text-xs text-gray-600 border-t border-white/5">
               <div className="flex items-center justify-between gap-2">
