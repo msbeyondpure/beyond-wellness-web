@@ -96,6 +96,10 @@ function SavedNotesList({ notes, selectedId, onSelect, onSave, onDelete, onToday
   const activeNoteTitle = activeNote?.title || ''
   const [draft, setDraft] = useState('')
   const [draftTitle, setDraftTitle] = useState('')
+  const [descriptionHeight, setDescriptionHeight] = useState(() => {
+    const s = localStorage.getItem('bwSavedNoteDescriptionHeight')
+    return s ? parseInt(s) : 140
+  })
 
   useEffect(() => {
     setDraft(activeNoteContent)
@@ -110,6 +114,32 @@ function SavedNotesList({ notes, selectedId, onSelect, onSave, onDelete, onToday
       content: draft,
       updated_at: new Date().toISOString(),
     })
+  }
+
+  const startDescriptionResize = (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const startY = e.clientY
+    const startH = descriptionHeight
+    const prevCursor = document.body.style.cursor
+    const prevSelect = document.body.style.userSelect
+    document.body.style.cursor = 'row-resize'
+    document.body.style.userSelect = 'none'
+
+    const onMove = (event) => {
+      const next = clamp(startH + (event.clientY - startY), 100, 520)
+      setDescriptionHeight(next)
+      localStorage.setItem('bwSavedNoteDescriptionHeight', String(next))
+    }
+    const onUp = () => {
+      document.body.style.cursor = prevCursor
+      document.body.style.userSelect = prevSelect
+      document.removeEventListener('pointermove', onMove)
+      document.removeEventListener('pointerup', onUp)
+    }
+
+    document.addEventListener('pointermove', onMove)
+    document.addEventListener('pointerup', onUp)
   }
 
   return (
@@ -178,9 +208,17 @@ function SavedNotesList({ notes, selectedId, onSelect, onSave, onDelete, onToday
                     value={draft}
                     onChange={e => setDraft(e.target.value)}
                     onBlur={saveDraft}
-                    className="w-full min-h-[120px] p-2 bg-white/5 border border-white/10 rounded text-gray-300 text-sm resize-y focus:outline-none focus:ring-1 focus:ring-brand-accent placeholder-gray-600 custom-scrollbar"
+                    className="w-full min-h-[100px] p-2 bg-white/5 border border-white/10 rounded text-gray-300 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-brand-accent placeholder-gray-600 custom-scrollbar"
+                    style={{ height: descriptionHeight }}
                     placeholder="Daily note..."
                   />
+                  <div
+                    onPointerDown={startDescriptionResize}
+                    className="h-3 flex items-center justify-center cursor-row-resize select-none group"
+                    title="Resize note description"
+                  >
+                    <div className="h-px w-full bg-white/10 group-hover:bg-brand-accent/50 transition-colors" />
+                  </div>
                   <div className="flex items-center justify-end gap-2 mt-2">
                     <button onClick={saveDraft} className="btn-primary px-3 py-1 rounded text-white text-xs">Save</button>
                     <button onClick={() => onDelete(note.id)} className="px-3 py-1 bg-red-500/10 text-red-300 rounded text-xs hover:bg-red-500/20">Delete</button>
@@ -587,21 +625,6 @@ export default function Tasks({ userId, onStatsChange, resetKey, registerUndo })
     document.addEventListener('pointermove', onMove)
     document.addEventListener('pointerup', onUp)
   }
-
-  useEffect(() => {
-    if (!activeSavedNoteId || notepadCollapsed) return
-    const targetListHeight = 340
-    const targetHeight = Math.min(maxNotepadHeight(), 655)
-    if (notepadSavedNotesHeight < targetListHeight) {
-      const nextListHeight = Math.min(targetListHeight, Math.max(120, targetHeight - 205))
-      setNotepadSavedNotesHeight(nextListHeight)
-      localStorage.setItem('bwNotepadSavedNotesHeight', String(nextListHeight))
-    }
-    if (notepadHeight < targetHeight) {
-      persistNotepadHeight(targetHeight)
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeSavedNoteId, notepadCollapsed])
 
   function orderedVisibleTasks(cat, source = displayTasks) {
     return source
