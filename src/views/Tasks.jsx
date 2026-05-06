@@ -7,6 +7,8 @@ import { animateLayoutShift, rememberLayoutNode } from '../lib/reorderAnimation'
 import SelectionBar from '../components/SelectionBar'
 import { copyToClipboard, isEditingTarget, useMultiSelection } from '../hooks/useMultiSelection'
 
+const NOTEPAD_HISTORY_LIMIT = 50
+
 // Icons
 const Plus = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
 const Check = () => <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>
@@ -88,15 +90,25 @@ function notePreview(content) {
 
 function SavedNotesList({ notes, selectedId, onSelect, onSave, onDelete, onToday, className = '' }) {
   const activeNote = selectedId ? notes.find(note => note.id === selectedId) : null
+  const activeNoteContent = activeNote?.content || ''
+  const activeNoteDate = activeNote?.date || ''
+  const activeNoteTitle = activeNote?.title || ''
   const [draft, setDraft] = useState('')
+  const [draftTitle, setDraftTitle] = useState('')
 
   useEffect(() => {
-    setDraft(activeNote?.content || '')
-  }, [activeNote?.id, activeNote?.content])
+    setDraft(activeNoteContent)
+    setDraftTitle(activeNoteTitle || (activeNoteDate ? formatNoteTitle(activeNoteDate) : ''))
+  }, [activeNoteContent, activeNoteDate, activeNoteTitle])
 
   const saveDraft = () => {
     if (!activeNote) return
-    onSave({ ...activeNote, content: draft, updated_at: new Date().toISOString() })
+    onSave({
+      ...activeNote,
+      title: draftTitle.trim() || formatNoteTitle(activeNote.date),
+      content: draft,
+      updated_at: new Date().toISOString(),
+    })
   }
 
   return (
@@ -153,6 +165,14 @@ function SavedNotesList({ notes, selectedId, onSelect, onSave, onDelete, onToday
 
               {expanded && (
                 <div className="border-t border-white/10 p-3 bg-brand-dark/50 animate-slideUp" onClick={e => e.stopPropagation()}>
+                  <input
+                    value={draftTitle}
+                    onChange={e => setDraftTitle(e.target.value)}
+                    onBlur={saveDraft}
+                    onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+                    className="w-full mb-2 p-2 bg-white/5 border border-white/10 rounded text-gray-100 text-sm font-medium focus:outline-none focus:ring-1 focus:ring-brand-accent placeholder-gray-600"
+                    placeholder="Saved note title"
+                  />
                   <textarea
                     value={draft}
                     onChange={e => setDraft(e.target.value)}
@@ -174,7 +194,7 @@ function SavedNotesList({ notes, selectedId, onSelect, onSave, onDelete, onToday
   )
 }
 
-export default function Tasks({ userId, onStatsChange, resetKey }) {
+export default function Tasks({ userId, onStatsChange, resetKey, registerUndo }) {
   const { tasks, loading, addTask, updateTask, deleteTask, restoreTask, categoryOrder, setCategoryOrder } = useTasks(userId)
   const { content: notepadContent, updateContent } = useNotepad(userId)
   const { notes: savedNotes, saveNote, deleteNote, getOrCreateDailyNote, appendToDailyNote } = useSavedNotes(userId)
@@ -209,6 +229,12 @@ export default function Tasks({ userId, onStatsChange, resetKey }) {
   const [activeSavedNoteId, setActiveSavedNoteId] = useState(null)
   const [savedNoteFlash, setSavedNoteFlash] = useState('')
   const notepadRef = useRef(null)
+  const notepadContentRef = useRef('')
+  const notepadUndoRef = useRef([])
+  const notepadRedoRef = useRef([])
+  const notepadSessionStartRef = useRef(null)
+  const notepadUndoHandlerRef = useRef(null)
+  const notepadRedoHandlerRef = useRef(null)
   const taskLayoutRef = useRef(new Map())
   const sectionLayoutRef = useRef(new Map())
   const dragTaskRef = useRef(null)
@@ -233,6 +259,92 @@ export default function Tasks({ userId, onStatsChange, resetKey }) {
     const hidden = displayTasks.filter(t => t.category === cat && t.hidden).length
     return { done: ct.filter(t => t.completed).length + hidden, total: ct.length + hidden }
   }
+
+  useEffect(() => {
+    notepadContentRef.current = notepadContent
+  }, [notepadContent])
+
+  function pushNotepadUndo(snapshot, allowCurrent = false) {
+    const value = String(snapshot ?? '')
+    const stack = notepadUndoRef.current
+    if (stack[stack.length - 1] === value || (!allowCurrent && notepadContentRef.current === value)) return
+    notepadUndoRef.current = [...stack.slice(-(NOTEPAD_HISTORY_LIMIT - 1)), value]
+    notepadRedoRef.current = []
+  }
+
+  function updateNotepadValue(next) {
+    const value = String(next ?? '')
+    notepadContentRef.current = value
+    updateContent(value)
+  }
+
+  function handleNotepadChange(next) {
+    if (notepadSessionStartRef.current === null) {
+      notepadSessionStartRef.current = notepadContentRef.current
+    }
+    updateNotepadValue(next)
+  }
+
+  function commitNotepadSession() {
+    const start = notepadSessionStartRef.current
+    notepadSessionStartRef.current = null
+    if (start !== null && start !== notepadContentRef.current) {
+      pushNotepadUndo(start)
+    }
+  }
+
+  function updateNotepadWithCheckpoint(next, snapshot = notepadContentRef.current) {
+    notepadSessionStartRef.current = null
+    if (String(next ?? '') !== String(snapshot ?? '')) {
+      pushNotepadUndo(snapshot, true)
+    }
+    updateNotepadValue(next)
+  }
+
+  function performNotepadUndo() {
+    commitNotepadSession()
+    const stack = notepadUndoRef.current
+    if (!stack.length) return
+    const previous = stack[stack.length - 1]
+    const current = notepadContentRef.current
+    notepadUndoRef.current = stack.slice(0, -1)
+    notepadRedoRef.current = [...notepadRedoRef.current.slice(-(NOTEPAD_HISTORY_LIMIT - 1)), current]
+    updateNotepadValue(previous)
+  }
+
+  function performNotepadRedo() {
+    commitNotepadSession()
+    const stack = notepadRedoRef.current
+    if (!stack.length) return
+    const next = stack[stack.length - 1]
+    const current = notepadContentRef.current
+    notepadRedoRef.current = stack.slice(0, -1)
+    notepadUndoRef.current = [...notepadUndoRef.current.slice(-(NOTEPAD_HISTORY_LIMIT - 1)), current]
+    updateNotepadValue(next)
+  }
+
+  function handleNotepadKeyDown(e) {
+    const mod = e.ctrlKey || e.metaKey
+    if (!mod || e.altKey || notepadSessionStartRef.current !== null) return
+    const key = e.key.toLowerCase()
+    if (key === 'z' && !e.shiftKey && notepadUndoRef.current.length) {
+      e.preventDefault()
+      performNotepadUndo()
+    } else if (((key === 'z' && e.shiftKey) || key === 'y') && notepadRedoRef.current.length) {
+      e.preventDefault()
+      performNotepadRedo()
+    }
+  }
+
+  notepadUndoHandlerRef.current = performNotepadUndo
+  notepadRedoHandlerRef.current = performNotepadRedo
+
+  useEffect(() => {
+    registerUndo?.(
+      () => notepadUndoHandlerRef.current?.(),
+      () => notepadRedoHandlerRef.current?.()
+    )
+  }, [registerUndo])
 
   // Report stats up to Layout
   useEffect(() => {
@@ -501,12 +613,12 @@ export default function Tasks({ userId, onStatsChange, resetKey }) {
     finishTaskDrag(true)
   }
 
-  function selectedNotepadText() {
+  function getNotepadSelection() {
     const node = notepadRef.current
-    if (!node) return ''
+    if (!node) return { start: 0, end: 0, text: '' }
     const start = Number(node.selectionStart)
     const end = Number(node.selectionEnd)
-    return end > start ? node.value.slice(start, end) : ''
+    return { start, end, text: end > start ? node.value.slice(start, end) : '' }
   }
 
   async function openTodaySavedNote() {
@@ -524,13 +636,27 @@ export default function Tasks({ userId, onStatsChange, resetKey }) {
   }
 
   async function addToSavedNotes(source = 'auto') {
-    const selected = selectedNotepadText()
-    const content = source === 'full' ? notepadContent : selected || notepadContent
+    commitNotepadSession()
+    const current = notepadContentRef.current
+    const selection = getNotepadSelection()
+    const selected = selection.text
+    const content = source === 'full' ? current : selected || current
     const note = await appendToDailyNote(content)
     if (!note) {
       setSavedNoteFlash('Nothing to save')
     } else {
       setActiveSavedNoteId(note.id)
+      const nextContent = selected && source !== 'full'
+        ? `${current.slice(0, selection.start)}${current.slice(selection.end)}`
+        : ''
+      updateNotepadWithCheckpoint(nextContent, current)
+      requestAnimationFrame(() => {
+        const node = notepadRef.current
+        if (!node) return
+        const pos = selected && source !== 'full' ? selection.start : 0
+        node.focus()
+        node.setSelectionRange(pos, pos)
+      })
       setSavedNoteFlash(selected && source !== 'full' ? 'Selection saved' : 'Notepad saved')
     }
     setTimeout(() => setSavedNoteFlash(''), 1800)
@@ -554,11 +680,11 @@ export default function Tasks({ userId, onStatsChange, resetKey }) {
 
   return (
     <div className="p-3 pt-4 sm:p-4 sm:pt-6 animate-fadeIn">
-      <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 max-w-5xl mx-auto">
+      <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 w-full max-w-none mx-0">
 
         {/* ── Notepad (LEFT on desktop, hidden on mobile — accessed via button) ── */}
         <div
-          className={`notepad-section glass-card rounded transition-all flex-shrink-0 hidden sm:block ${notepadCollapsed ? 'w-10' : 'w-96'}`}
+          className={`notepad-section glass-card rounded transition-all hidden sm:block ${notepadCollapsed ? 'w-10 flex-shrink-0' : 'sm:flex-[0_1_20%] sm:min-w-[260px] sm:max-w-[380px]'}`}
           style={{ alignSelf: 'flex-start' }}
         >
           {notepadCollapsed ? (
@@ -593,7 +719,9 @@ export default function Tasks({ userId, onStatsChange, resetKey }) {
               <textarea
                 ref={notepadRef}
                 value={notepadContent}
-                onChange={e => updateContent(e.target.value)}
+                onChange={e => handleNotepadChange(e.target.value)}
+                onBlur={commitNotepadSession}
+                onKeyDown={handleNotepadKeyDown}
                 placeholder={"Quick notes...\n\nJot anything down here."}
                 className="flex-1 min-h-[150px] w-full p-2 bg-white/5 border border-white/10 rounded text-gray-300 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-brand-accent placeholder-gray-600"
               />
@@ -624,7 +752,7 @@ export default function Tasks({ userId, onStatsChange, resetKey }) {
         <div
           ref={taskSelection.containerRef}
           onMouseDown={taskSelection.handleSurfaceMouseDown}
-          className="tasks-section glass-card rounded p-3 sm:p-5 flex-1 min-w-0 relative"
+          className="tasks-section glass-card rounded p-3 sm:p-5 flex-1 sm:flex-[1_1_80%] min-w-0 relative"
         >
           {taskSelection.selectionBox}
           <div className="flex items-center justify-between mb-4 sm:mb-5 gap-2">
@@ -895,7 +1023,9 @@ export default function Tasks({ userId, onStatsChange, resetKey }) {
             <textarea
               ref={notepadRef}
               value={notepadContent}
-              onChange={e => updateContent(e.target.value)}
+              onChange={e => handleNotepadChange(e.target.value)}
+              onBlur={commitNotepadSession}
+              onKeyDown={handleNotepadKeyDown}
               placeholder={"Quick notes...\n\nJot anything down here."}
               className="flex-1 min-h-[150px] w-full p-4 bg-transparent text-gray-300 text-base resize-none focus:outline-none placeholder-gray-600"
               autoFocus

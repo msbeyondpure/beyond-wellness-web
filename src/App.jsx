@@ -64,7 +64,7 @@ export default function App() {
         return <Editor userId={user.id} resetKey={resetKeys.editor} registerUndo={registerUndo} />
       case 'tasks':
       default:
-        return <Tasks userId={user.id} onStatsChange={setTaskStats} resetKey={resetKeys.tasks} />
+        return <Tasks userId={user.id} onStatsChange={setTaskStats} resetKey={resetKeys.tasks} registerUndo={registerUndo} />
     }
   }
 
