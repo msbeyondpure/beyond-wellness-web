@@ -517,6 +517,7 @@ function TreeNode({ node, files, depth = 0, activeFile, openFolders, dragPath, d
   return (
     <div>
       <div
+        data-editor-node-row="true"
         className={`flex items-center gap-1.5 py-1.5 sm:py-0.5 px-2 rounded cursor-pointer group transition-all
           ${isDragging ? 'opacity-45' : ''}
           ${isDropTarget ? 'bg-brand-accent/25 text-white ring-1 ring-brand-accent/70' : selection?.isSelected(node.path) ? 'bg-brand-accent/20 text-white ring-1 ring-brand-accent/55' : isActive ? 'bg-brand-accent/15 text-white' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5 active:bg-white/10'}`}
@@ -606,7 +607,7 @@ function getCursorPos(text, idx) {
 
 // ── main component ────────────────────────────────────────────────────────────
 export default function Editor({ userId, resetKey, registerUndo, embedded = false }) {
-  const { files, loading, createNode, saveContent, deleteNode, renameNode, moveNode } = useEditorFiles(userId)
+  const { files, loading, createNode, saveContent, deleteNode, renameNode, moveNodes } = useEditorFiles(userId)
 
   const [activeFile, setActiveFile]       = useState(null)
   const [content, setContent]             = useState('')
@@ -626,6 +627,7 @@ export default function Editor({ userId, resetKey, registerUndo, embedded = fals
   const [cursorPos, setCursorPos]         = useState({ line: 1, col: 1 })
   const [openTabs, setOpenTabs]           = useState([])
   const [dragPath, setDragPath]           = useState(null)
+  const [dragPaths, setDragPaths]         = useState([])
   const [dropPath, setDropPath]           = useState(null)
   const [, setHistoryVer]                 = useState(0)
 
@@ -933,6 +935,10 @@ export default function Editor({ userId, resetKey, registerUndo, embedded = fals
     }
     setRenaming(null)
   }
+  function topLevelMoveNodes(nodes) {
+    const paths = new Set(nodes.map(node => node.path))
+    return nodes.filter(node => ![...paths].some(path => path !== node.path && isPathWithin(node.path, path)))
+  }
   function applyMovedPaths(remap) {
     if (!remap) return
     if (activeFile && remap[activeFile.path]) {
@@ -949,50 +955,74 @@ export default function Editor({ userId, resetKey, registerUndo, embedded = fals
   }
   function startTreeDrag(e, node) {
     if (renaming) return
+    const movingNodes = fileSelection.isSelected(node.path)
+      ? topLevelMoveNodes(fileSelection.selectedItems)
+      : [node]
+    const paths = movingNodes.map(item => item.path)
     setDragPath(node.path)
+    setDragPaths(paths)
     e.dataTransfer.effectAllowed = 'move'
-    e.dataTransfer.setData('text/plain', node.path)
+    e.dataTransfer.setData('application/x-editor-paths', JSON.stringify(paths))
+    e.dataTransfer.setData('text/plain', paths.join('\n'))
+  }
+  function getDragPaths(e) {
+    if (dragPaths.length) return dragPaths
+    try {
+      const raw = e.dataTransfer.getData('application/x-editor-paths')
+      if (raw) return JSON.parse(raw)
+    } catch { /* fall back to text */ }
+    return e.dataTransfer.getData('text/plain').split('\n').map(path => path.trim()).filter(Boolean)
   }
   function dragOverTreeNode(e, node) {
-    const dragged = dragPath || e.dataTransfer.getData('text/plain')
-    if (!dragged || dragged === node.path) return
+    const paths = getDragPaths(e)
+    if (!paths.length || paths.includes(node.path)) return
     if (node.type !== 'folder') return
-    if (isPathWithin(node.path, dragged)) return
+    if (paths.some(path => isPathWithin(node.path, path))) return
     e.preventDefault()
     e.stopPropagation()
     e.dataTransfer.dropEffect = 'move'
     setDropPath(node.path)
   }
   async function dropOnTreeNode(e, node) {
-    const dragged = dragPath || e.dataTransfer.getData('text/plain')
-    if (!dragged || node.type !== 'folder') return
+    const paths = getDragPaths(e)
+    if (!paths.length || node.type !== 'folder') return
     e.preventDefault(); e.stopPropagation()
-    setDragPath(null); setDropPath(null)
-    const result = await moveNode(dragged, node.path)
+    setDragPath(null); setDragPaths([]); setDropPath(null)
+    const result = await moveNodes(paths, node.path)
     if (result?.remap) {
       applyMovedPaths(result.remap)
       setOpenFolders(prev => new Set([...prev, node.path]))
+      fileSelection.clearSelection()
     }
   }
   function dragOverRoot(e) {
-    const dragged = dragPath || e.dataTransfer.getData('text/plain')
-    if (!dragged) return
-    const node = files.find(f => f.path === dragged)
-    if (!node || node.parent_path === '') return
+    if (e.target.closest?.('[data-editor-node-row="true"]')) return
+    const paths = getDragPaths(e)
+    if (!paths.length) return
+    const hasNested = paths.some(path => {
+      const node = files.find(f => f.path === path)
+      return node && node.parent_path !== ''
+    })
+    if (!hasNested) return
     e.preventDefault()
     e.dataTransfer.dropEffect = 'move'
     setDropPath('')
   }
   async function dropOnRoot(e) {
-    const dragged = dragPath || e.dataTransfer.getData('text/plain')
-    if (!dragged) return
+    if (e.target.closest?.('[data-editor-node-row="true"]')) return
+    const paths = getDragPaths(e)
+    if (!paths.length) return
     e.preventDefault()
-    setDragPath(null); setDropPath(null)
-    const result = await moveNode(dragged, '')
-    if (result?.remap) applyMovedPaths(result.remap)
+    setDragPath(null); setDragPaths([]); setDropPath(null)
+    const result = await moveNodes(paths, '')
+    if (result?.remap) {
+      applyMovedPaths(result.remap)
+      fileSelection.clearSelection()
+    }
   }
   function endTreeDrag() {
     setDragPath(null)
+    setDragPaths([])
     setDropPath(null)
   }
   function startResize(e) {
@@ -1109,10 +1139,6 @@ export default function Editor({ userId, resetKey, registerUndo, embedded = fals
     }
   }
 
-  function pathWithin(path, root) {
-    return path === root || path.startsWith(root + '/')
-  }
-
   async function deleteSelectedFiles() {
     if (!fileSelection.selectedCount) return
     if (!confirm(`Delete ${fileSelection.selectedCount} selected item${fileSelection.selectedCount === 1 ? '' : 's'}?`)) return
@@ -1122,10 +1148,10 @@ export default function Editor({ userId, resetKey, registerUndo, embedded = fals
       const parts = node.path.split('/')
       return !parts.slice(1).some((_, index) => selectedPaths.has(parts.slice(0, index + 1).join('/')))
     })
-    if (activeFile && selected.some(node => pathWithin(activeFile.path, node.path))) {
+    if (activeFile && selected.some(node => isPathWithin(activeFile.path, node.path))) {
       setActiveFile(null)
     }
-    setOpenTabs(prev => prev.filter(tab => !selected.some(node => pathWithin(tab.path, node.path))))
+    setOpenTabs(prev => prev.filter(tab => !selected.some(node => isPathWithin(tab.path, node.path))))
     for (const node of topLevel) await deleteNode(node.path)
     fileSelection.clearSelection()
   }
@@ -1169,7 +1195,11 @@ export default function Editor({ userId, resetKey, registerUndo, embedded = fals
   // ── sidebar ───────────────────────────────────────────────────────────────
   const sidebarContent = (
     <div className="glass-card sm:rounded-lg p-3 flex flex-col overflow-hidden h-full w-full">
-      <div className="flex items-center justify-between mb-3 shrink-0">
+      <div
+        className={`flex items-center justify-between mb-3 shrink-0 rounded px-1 py-0.5 transition-colors ${dropPath === '' ? 'bg-brand-accent/15 ring-1 ring-brand-accent/45' : ''}`}
+        onDragOver={dragOverRoot}
+        onDrop={dropOnRoot}
+      >
         <span className="text-white text-sm font-semibold">Files</span>
         <div className="flex gap-0.5">
           <button onClick={() => { setNewItemTarget({ parentPath: '', type: 'file' }); setNewItemName('') }} className="nav-icon" title="New File" aria-label="New File"><PlusIco /></button>

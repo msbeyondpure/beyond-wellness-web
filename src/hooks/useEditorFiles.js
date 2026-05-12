@@ -16,6 +16,46 @@ const withoutContent = (node) => {
   return next
 }
 const pathWithin = (path, parentPath) => path === parentPath || path.startsWith(parentPath + '/')
+const unique = (values) => [...new Set(values.filter(Boolean))]
+
+function topLevelPaths(paths) {
+  const ordered = unique(paths).sort((a, b) => a.length - b.length)
+  return ordered.filter(path => !ordered.some(parent => parent !== path && pathWithin(path, parent)))
+}
+
+function buildMovePlan(files, paths, newParentPath = '') {
+  const roots = topLevelPaths(Array.isArray(paths) ? paths : [paths])
+    .map(path => files.find(f => f.path === path))
+    .filter(Boolean)
+  if (!roots.length) return null
+  if (newParentPath && !files.some(f => f.path === newParentPath && f.type === 'folder')) return null
+  if (roots.some(node => node.type === 'folder' && newParentPath && pathWithin(newParentPath, node.path))) return null
+
+  const movingRoots = roots.filter(node => node.parent_path !== newParentPath)
+  if (!movingRoots.length) {
+    return { remap: Object.fromEntries(roots.map(node => [node.path, node.path])), rootPaths: roots.map(node => node.path) }
+  }
+
+  const rootDestinations = new Set()
+  const remap = {}
+  for (const root of movingRoots) {
+    const nextRootPath = newParentPath ? `${newParentPath}/${root.name}` : root.name
+    if (rootDestinations.has(nextRootPath)) return null
+    rootDestinations.add(nextRootPath)
+    files.forEach(file => {
+      if (file.path === root.path) remap[file.path] = nextRootPath
+      else if (file.path.startsWith(root.path + '/')) remap[file.path] = nextRootPath + file.path.slice(root.path.length)
+    })
+  }
+
+  const movedOldPaths = new Set(Object.keys(remap))
+  const conflicts = Object.values(remap).some(nextPath =>
+    files.some(file => !movedOldPaths.has(file.path) && file.path === nextPath)
+  )
+  if (conflicts) return null
+
+  return { remap, rootPaths: movingRoots.map(node => node.path) }
+}
 
 // ── hook ─────────────────────────────────────────────────────────────────────
 export function useEditorFiles(userId) {
@@ -144,50 +184,55 @@ export function useEditorFiles(userId) {
     return { ...node, path: newPath, name: newName.trim() }
   }
 
-  async function moveNode(path, newParentPath = '') {
-    const node = files.find(f => f.path === path)
-    if (!node) return null
-    if (node.parent_path === newParentPath) return { ...node, remap: { [path]: path } }
-    if (newParentPath && !files.some(f => f.path === newParentPath && f.type === 'folder')) return null
-    if (node.type === 'folder' && newParentPath && pathWithin(newParentPath, path)) return null
-
-    const newPath = newParentPath ? `${newParentPath}/${node.name}` : node.name
-    if (files.some(f => f.path === newPath)) return null
-
-    const remap = {}
-    files.forEach(f => {
-      if (f.path === path) remap[f.path] = newPath
-      else if (f.path.startsWith(path + '/')) remap[f.path] = newPath + f.path.slice(path.length)
-    })
+  async function moveNodes(paths, newParentPath = '') {
+    const plan = buildMovePlan(files, paths, newParentPath)
+    if (!plan) return null
+    const { remap, rootPaths } = plan
+    const changedEntries = Object.entries(remap).filter(([oldP, newP]) => oldP !== newP)
+    if (!changedEntries.length) return { remap, rootPaths }
 
     if (!useDB) {
+      const fileContent = new Map()
+      changedEntries.forEach(([oldP]) => {
+        const file = files.find(f => f.path === oldP)
+        if (file?.type === 'file') fileContent.set(oldP, loadLocalFile(oldP))
+      })
       const next = files.map(f => {
         if (!remap[f.path]) return f
         const np = remap[f.path]
-        if (f.type === 'file') { saveLocalFile(np, loadLocalFile(f.path)); deleteLocalFile(f.path) }
-        const isRoot = f.path === path
+        if (f.type === 'file' && np !== f.path) saveLocalFile(np, fileContent.get(f.path) || '')
+        const isRoot = rootPaths.includes(f.path)
         return { ...f, path: np, parent_path: isRoot ? newParentPath : (remap[f.parent_path] || f.parent_path) }
       })
+      changedEntries.forEach(([oldP]) => {
+        const file = files.find(f => f.path === oldP)
+        if (file?.type === 'file') deleteLocalFile(oldP)
+      })
       setFiles(next); saveLocalTree(next.map(withoutContent))
-      return { ...node, path: newPath, parent_path: newParentPath, remap }
+      return { remap, rootPaths }
     }
 
-    await Promise.all(Object.entries(remap).map(([oldP, newP]) => {
+    await Promise.all(changedEntries.map(([oldP, newP]) => {
       const f = files.find(f => f.path === oldP)
-      const isRoot = oldP === path
+      if (!f) return null
+      const isRoot = rootPaths.includes(oldP)
       return supabase.from('editor_files').update({
         path: newP,
         parent_path: isRoot ? newParentPath : (remap[f.parent_path] || f.parent_path),
         updated_at: new Date().toISOString()
-      }).eq('user_id', userId).eq('path', oldP)
+      }).eq('user_id', userId).eq('id', f.id)
     }))
     setFiles(prev => prev.map(f => {
       if (!remap[f.path]) return f
-      const isRoot = f.path === path
+      const isRoot = rootPaths.includes(f.path)
       return { ...f, path: remap[f.path], parent_path: isRoot ? newParentPath : (remap[f.parent_path] || f.parent_path) }
     }))
-    return { ...node, path: newPath, parent_path: newParentPath, remap }
+    return { remap, rootPaths }
   }
 
-  return { files, loading, createNode, saveContent, deleteNode, renameNode, moveNode }
+  async function moveNode(path, newParentPath = '') {
+    return moveNodes([path], newParentPath)
+  }
+
+  return { files, loading, createNode, saveContent, deleteNode, renameNode, moveNode, moveNodes }
 }
