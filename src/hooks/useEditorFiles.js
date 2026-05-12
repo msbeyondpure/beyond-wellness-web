@@ -15,6 +15,7 @@ const withoutContent = (node) => {
   delete next.content
   return next
 }
+const pathWithin = (path, parentPath) => path === parentPath || path.startsWith(parentPath + '/')
 
 // ── hook ─────────────────────────────────────────────────────────────────────
 export function useEditorFiles(userId) {
@@ -143,5 +144,50 @@ export function useEditorFiles(userId) {
     return { ...node, path: newPath, name: newName.trim() }
   }
 
-  return { files, loading, createNode, saveContent, deleteNode, renameNode }
+  async function moveNode(path, newParentPath = '') {
+    const node = files.find(f => f.path === path)
+    if (!node) return null
+    if (node.parent_path === newParentPath) return { ...node, remap: { [path]: path } }
+    if (newParentPath && !files.some(f => f.path === newParentPath && f.type === 'folder')) return null
+    if (node.type === 'folder' && newParentPath && pathWithin(newParentPath, path)) return null
+
+    const newPath = newParentPath ? `${newParentPath}/${node.name}` : node.name
+    if (files.some(f => f.path === newPath)) return null
+
+    const remap = {}
+    files.forEach(f => {
+      if (f.path === path) remap[f.path] = newPath
+      else if (f.path.startsWith(path + '/')) remap[f.path] = newPath + f.path.slice(path.length)
+    })
+
+    if (!useDB) {
+      const next = files.map(f => {
+        if (!remap[f.path]) return f
+        const np = remap[f.path]
+        if (f.type === 'file') { saveLocalFile(np, loadLocalFile(f.path)); deleteLocalFile(f.path) }
+        const isRoot = f.path === path
+        return { ...f, path: np, parent_path: isRoot ? newParentPath : (remap[f.parent_path] || f.parent_path) }
+      })
+      setFiles(next); saveLocalTree(next.map(withoutContent))
+      return { ...node, path: newPath, parent_path: newParentPath, remap }
+    }
+
+    await Promise.all(Object.entries(remap).map(([oldP, newP]) => {
+      const f = files.find(f => f.path === oldP)
+      const isRoot = oldP === path
+      return supabase.from('editor_files').update({
+        path: newP,
+        parent_path: isRoot ? newParentPath : (remap[f.parent_path] || f.parent_path),
+        updated_at: new Date().toISOString()
+      }).eq('user_id', userId).eq('path', oldP)
+    }))
+    setFiles(prev => prev.map(f => {
+      if (!remap[f.path]) return f
+      const isRoot = f.path === path
+      return { ...f, path: remap[f.path], parent_path: isRoot ? newParentPath : (remap[f.parent_path] || f.parent_path) }
+    }))
+    return { ...node, path: newPath, parent_path: newParentPath, remap }
+  }
+
+  return { files, loading, createNode, saveContent, deleteNode, renameNode, moveNode }
 }

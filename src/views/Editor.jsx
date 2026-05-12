@@ -504,21 +504,29 @@ function BlocksMenu({ onInsert, onClose }) {
 }
 
 // ── tree node ─────────────────────────────────────────────────────────────────
-function TreeNode({ node, files, depth = 0, activeFile, openFolders, onSelect, onToggle, onCtx, renaming, renameValue, setRenameValue, onRenameBlur, onRenameKey, selection }) {
+function TreeNode({ node, files, depth = 0, activeFile, openFolders, dragPath, dropPath, onSelect, onToggle, onCtx, onDragStart, onDragOverNode, onDropNode, onDragEnd, renaming, renameValue, setRenameValue, onRenameBlur, onRenameKey, selection }) {
   const children = files.filter(n => n.parent_path === node.path).sort((a, b) => {
     if (a.type !== b.type) return a.type === 'folder' ? -1 : 1
     return a.name.localeCompare(b.name)
   })
   const isOpen   = openFolders.has(node.path)
   const isActive = activeFile?.path === node.path
+  const isDragging = dragPath === node.path
+  const isDropTarget = dropPath === node.path
   const ext      = node.type === 'file' ? getExt(node.name) : ''
   return (
     <div>
       <div
         className={`flex items-center gap-1.5 py-1.5 sm:py-0.5 px-2 rounded cursor-pointer group transition-all
-          ${selection?.isSelected(node.path) ? 'bg-brand-accent/20 text-white ring-1 ring-brand-accent/55' : isActive ? 'bg-brand-accent/15 text-white' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5 active:bg-white/10'}`}
+          ${isDragging ? 'opacity-45' : ''}
+          ${isDropTarget ? 'bg-brand-accent/25 text-white ring-1 ring-brand-accent/70' : selection?.isSelected(node.path) ? 'bg-brand-accent/20 text-white ring-1 ring-brand-accent/55' : isActive ? 'bg-brand-accent/15 text-white' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5 active:bg-white/10'}`}
         ref={selection?.itemRef(node.path)}
+        draggable={!renaming}
         style={{ paddingLeft: `${8 + depth * 14}px` }}
+        onDragStart={e => onDragStart(e, node)}
+        onDragOver={e => onDragOverNode(e, node)}
+        onDrop={e => onDropNode(e, node)}
+        onDragEnd={onDragEnd}
         onClick={e => selection
           ? selection.handleItemClick(e, node, () => node.type === 'folder' ? onToggle(node.path) : onSelect(node))
           : (node.type === 'folder' ? onToggle(node.path) : onSelect(node))}
@@ -536,8 +544,9 @@ function TreeNode({ node, files, depth = 0, activeFile, openFolders, onSelect, o
       </div>
       {node.type === 'folder' && isOpen && children.map(child => (
         <TreeNode key={child.id} node={child} files={files} depth={depth + 1}
-          activeFile={activeFile} openFolders={openFolders}
+          activeFile={activeFile} openFolders={openFolders} dragPath={dragPath} dropPath={dropPath}
           onSelect={onSelect} onToggle={onToggle} onCtx={onCtx}
+          onDragStart={onDragStart} onDragOverNode={onDragOverNode} onDropNode={onDropNode} onDragEnd={onDragEnd}
           renaming={renaming} renameValue={renameValue}
           setRenameValue={setRenameValue} onRenameBlur={onRenameBlur} onRenameKey={onRenameKey}
           selection={selection}
@@ -564,6 +573,10 @@ function visibleTreeNodes(files, openFolders, parentPath = '') {
       ? [node, ...visibleTreeNodes(files, openFolders, node.path)]
       : [node]
   ))
+}
+
+function isPathWithin(path, parentPath) {
+  return path === parentPath || path.startsWith(parentPath + '/')
 }
 
 function TB({ onClick, title, active, disabled, children }) {
@@ -593,7 +606,7 @@ function getCursorPos(text, idx) {
 
 // ── main component ────────────────────────────────────────────────────────────
 export default function Editor({ userId, resetKey, registerUndo, embedded = false }) {
-  const { files, loading, createNode, saveContent, deleteNode, renameNode } = useEditorFiles(userId)
+  const { files, loading, createNode, saveContent, deleteNode, renameNode, moveNode } = useEditorFiles(userId)
 
   const [activeFile, setActiveFile]       = useState(null)
   const [content, setContent]             = useState('')
@@ -604,7 +617,7 @@ export default function Editor({ userId, resetKey, registerUndo, embedded = fals
   const [renameValue, setRenameValue]     = useState('')
   const [newItemTarget, setNewItemTarget] = useState(null)
   const [newItemName, setNewItemName]     = useState('')
-  const [viewMode, setViewMode]           = useState('source')
+  const [viewMode, setViewMode]           = useState(() => localStorage.getItem('bwEditorViewMode') || 'source')
   const [leftW, setLeftW]                 = useState(() => parseInt(localStorage.getItem('bwEditorLeftW') || '240', 10))
   const [showMobileSidebar, setShowMobileSidebar] = useState(false)
   const [fullScreen, setFullScreen]       = useState(false)
@@ -612,6 +625,8 @@ export default function Editor({ userId, resetKey, registerUndo, embedded = fals
   const [findQuery, setFindQuery]         = useState('')
   const [cursorPos, setCursorPos]         = useState({ line: 1, col: 1 })
   const [openTabs, setOpenTabs]           = useState([])
+  const [dragPath, setDragPath]           = useState(null)
+  const [dropPath, setDropPath]           = useState(null)
   const [, setHistoryVer]                 = useState(0)
 
   // html toolkit state
@@ -786,7 +801,13 @@ export default function Editor({ userId, resetKey, registerUndo, embedded = fals
 
   // ── persist panel width ───────────────────────────────────────────────────
   useEffect(() => { localStorage.setItem('bwEditorLeftW', String(leftW)) }, [leftW])
+  useEffect(() => { localStorage.setItem('bwEditorViewMode', viewMode) }, [viewMode])
   useEffect(() => { if (activeFile) setShowMobileSidebar(false) }, [activeFile])
+  useEffect(() => {
+    if (!activeFile) return
+    const supportsPreview = isMarkdown(activeFile.name) || isHtml(activeFile.name)
+    if (!supportsPreview && (viewMode === 'preview' || viewMode === 'split')) setViewMode('source')
+  }, [activeFile, viewMode])
   useEffect(() => {
     const fn = () => { if (window.innerWidth < 640 && (viewMode === 'split' || viewMode === 'edit')) setViewMode('source') }
     fn(); window.addEventListener('resize', fn)
@@ -874,8 +895,6 @@ export default function Editor({ userId, resetKey, registerUndo, embedded = fals
   async function openFile(node) {
     if (!isText(node.name)) return
     setActiveFile({ path: node.path, name: node.name })
-    if (isMarkdown(node.name)) setViewMode('split')
-    else setViewMode('source')
     setOpenTabs(prev => {
       const filtered = prev.filter(t => t.path !== node.path)
       return [{ path: node.path, name: node.name }, ...filtered].slice(0, 6)
@@ -913,6 +932,68 @@ export default function Editor({ userId, resetKey, registerUndo, embedded = fals
       setOpenTabs(prev => prev.map(t => t.path === renaming.path ? { path: result.path, name: result.name } : t))
     }
     setRenaming(null)
+  }
+  function applyMovedPaths(remap) {
+    if (!remap) return
+    if (activeFile && remap[activeFile.path]) {
+      const nextPath = remap[activeFile.path]
+      const moved = files.find(f => f.path === activeFile.path)
+      setActiveFile({ path: nextPath, name: moved?.name || activeFile.name })
+    }
+    setOpenTabs(prev => prev.map(tab => remap[tab.path] ? { ...tab, path: remap[tab.path] } : tab))
+    setOpenFolders(prev => {
+      const next = new Set()
+      prev.forEach(path => next.add(remap[path] || path))
+      return next
+    })
+  }
+  function startTreeDrag(e, node) {
+    if (renaming) return
+    setDragPath(node.path)
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/plain', node.path)
+  }
+  function dragOverTreeNode(e, node) {
+    const dragged = dragPath || e.dataTransfer.getData('text/plain')
+    if (!dragged || dragged === node.path) return
+    if (node.type !== 'folder') return
+    if (isPathWithin(node.path, dragged)) return
+    e.preventDefault()
+    e.stopPropagation()
+    e.dataTransfer.dropEffect = 'move'
+    setDropPath(node.path)
+  }
+  async function dropOnTreeNode(e, node) {
+    const dragged = dragPath || e.dataTransfer.getData('text/plain')
+    if (!dragged || node.type !== 'folder') return
+    e.preventDefault(); e.stopPropagation()
+    setDragPath(null); setDropPath(null)
+    const result = await moveNode(dragged, node.path)
+    if (result?.remap) {
+      applyMovedPaths(result.remap)
+      setOpenFolders(prev => new Set([...prev, node.path]))
+    }
+  }
+  function dragOverRoot(e) {
+    const dragged = dragPath || e.dataTransfer.getData('text/plain')
+    if (!dragged) return
+    const node = files.find(f => f.path === dragged)
+    if (!node || node.parent_path === '') return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    setDropPath('')
+  }
+  async function dropOnRoot(e) {
+    const dragged = dragPath || e.dataTransfer.getData('text/plain')
+    if (!dragged) return
+    e.preventDefault()
+    setDragPath(null); setDropPath(null)
+    const result = await moveNode(dragged, '')
+    if (result?.remap) applyMovedPaths(result.remap)
+  }
+  function endTreeDrag() {
+    setDragPath(null)
+    setDropPath(null)
   }
   function startResize(e) {
     e.preventDefault(); resizing.current = true
@@ -1118,7 +1199,10 @@ export default function Editor({ userId, resetKey, registerUndo, embedded = fals
       <div
         ref={fileSelection.containerRef}
         onMouseDown={fileSelection.handleSurfaceMouseDown}
-        className="flex-1 overflow-y-auto relative"
+        onDragOver={dragOverRoot}
+        onDrop={dropOnRoot}
+        onDragEnd={endTreeDrag}
+        className={`flex-1 overflow-y-auto relative rounded transition-colors ${dropPath === '' ? 'bg-brand-accent/10 ring-1 ring-brand-accent/40' : ''}`}
       >
         {fileSelection.selectionBox}
         {roots.length === 0 && !newItemTarget && (
@@ -1127,9 +1211,11 @@ export default function Editor({ userId, resetKey, registerUndo, embedded = fals
         {roots.map(node => (
           <div key={node.id}>
             <TreeNode node={node} files={files} activeFile={activeFile} openFolders={openFolders}
+              dragPath={dragPath} dropPath={dropPath}
               onSelect={openFile}
               onToggle={path => setOpenFolders(s => { const n = new Set(s); n.has(path) ? n.delete(path) : n.add(path); return n })}
               onCtx={nodeCtx} renaming={renaming} renameValue={renameValue}
+              onDragStart={startTreeDrag} onDragOverNode={dragOverTreeNode} onDropNode={dropOnTreeNode} onDragEnd={endTreeDrag}
               setRenameValue={setRenameValue} onRenameBlur={commitRename}
               onRenameKey={e => { if (e.key === 'Enter') commitRename(); if (e.key === 'Escape') setRenaming(null) }}
               selection={fileSelection}
