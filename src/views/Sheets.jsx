@@ -1602,7 +1602,7 @@ export default function Sheets({ userId, resetKey, registerUndo, embedded = fals
                           <button
                             key={product}
                             onClick={() => openBatchProduct(sheet, product)}
-                            className={`w-full text-left px-3 py-2 rounded text-xs transition-all ${activeBatch && activeBatchProduct === product ? 'bg-brand-accent/20 text-white border border-brand-accent/30' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5 border border-transparent'}`}
+                            className={`tactile-card w-full text-left px-3 py-2 rounded text-xs transition-all ${activeBatch && activeBatchProduct === product ? 'bg-brand-accent/20 text-white border border-brand-accent/30' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5 border border-transparent'}`}
                           >
                             <span className="block truncate">{product}</span>
                             <span className="block text-[10px] text-gray-600 mt-0.5">

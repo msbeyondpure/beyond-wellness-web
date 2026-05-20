@@ -19,6 +19,7 @@ const STATUSES = ['Active', 'Inactive', 'Pending']
 
 const emptyOutreach = { name: '', platform: 'Instagram', handle: '', email: '', date_contacted: '', response: 'No response', notes: '' }
 const emptyAffiliate = { name: '', platform: 'Instagram', handle: '', email: '', link: '', code: '', date_joined: '', total_sales: 0, commission: 0, status: 'Active', payment_method: 'PayPal', notes: '' }
+const CARD_CONTROL_SELECTOR = 'button, a, input, textarea, select, [role="button"], [data-no-card-press="true"]'
 
 function SortHeader({ label, field, sort, setSort }) {
   const active = sort.field === field
@@ -92,6 +93,7 @@ export default function Affiliates({ userId, resetKey }) {
   const [editingAffiliateId, setEditingAffiliateId] = useState(null)
   const [selectedAffiliate, setSelectedAffiliate] = useState(null)
   const [inlineEdit, setInlineEdit] = useState(null) // { id, field, value }
+  const [pressedCardId, setPressedCardId] = useState(null)
 
   // reset when tab icon re-tapped
   useEffect(() => {
@@ -130,6 +132,13 @@ export default function Affiliates({ userId, resetKey }) {
 
   function openAddAffiliate() { setAffiliateForm(emptyAffiliate); setEditingAffiliateId(null); setShowAffiliateForm(true) }
   function openEditAffiliate(item) { setAffiliateForm({ ...item }); setEditingAffiliateId(item.id); setShowAffiliateForm(true); setSelectedAffiliate(null) }
+  function startCardPress(e, id) {
+    if (e.target.closest?.(CARD_CONTROL_SELECTOR)) return
+    setPressedCardId(id)
+    const clear = () => setPressedCardId(current => current === id ? null : current)
+    window.addEventListener('pointerup', clear, { once: true })
+    window.addEventListener('pointercancel', clear, { once: true })
+  }
 
   async function submitAffiliate() {
     if (!affiliateForm.name.trim()) return
@@ -393,7 +402,8 @@ export default function Affiliates({ userId, resetKey }) {
                   <div
                     key={item.id}
                     ref={recordSelection.itemRef(item.id)}
-                    className={`mobile-card ${recordSelection.isSelected(item.id) ? 'ring-1 ring-brand-accent/70 bg-brand-accent/10' : ''}`}
+                    onPointerDown={e => startCardPress(e, item.id)}
+                    className={`mobile-card tactile-card ${pressedCardId === item.id ? 'is-tactile-pressed' : ''} ${recordSelection.isSelected(item.id) ? 'ring-1 ring-brand-accent/70 bg-brand-accent/10' : ''}`}
                     onClick={e => recordSelection.handleItemClick(e, item, () => openEditOutreach(item))}
                   >
                     <div className="flex items-start justify-between mb-1.5">
@@ -640,7 +650,8 @@ export default function Affiliates({ userId, resetKey }) {
                   <div
                     key={item.id}
                     ref={recordSelection.itemRef(item.id)}
-                    className={`mobile-card ${recordSelection.isSelected(item.id) ? 'ring-1 ring-brand-accent/70 bg-brand-accent/10' : ''}`}
+                    onPointerDown={e => startCardPress(e, item.id)}
+                    className={`mobile-card tactile-card ${pressedCardId === item.id ? 'is-tactile-pressed' : ''} ${recordSelection.isSelected(item.id) ? 'ring-1 ring-brand-accent/70 bg-brand-accent/10' : ''}`}
                     onClick={e => recordSelection.handleItemClick(e, item, () => setSelectedAffiliate(item))}
                   >
                     <div className="flex items-start justify-between mb-1.5">
